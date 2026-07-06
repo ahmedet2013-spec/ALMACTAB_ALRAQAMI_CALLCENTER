@@ -734,6 +734,19 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
             
             st.subheader(f"🖨️ الأجهزة والمعدات التابعة لـ {c_info['name']}")
             if not equip_df.empty:
+                # --- هذا هو التعديل الجذري لحل مشكلة الحروف المقطوعة في الجدول ---
+                equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
+                
+                display_equip_df = equip_df[['brand', 'model', 'serial_number', 'sla_type', 'pm_visits_count', 'حالة العقد']].copy()
+                display_equip_df.columns = ['الماركة', 'الموديل', 'الرقم التسلسلي (S/N)', 'نوع العقد (SLA)', 'الزيارات الدورية السنوية', 'حالة العقد']
+                
+                st.dataframe(display_equip_df, use_container_width=True)
+                # -----------------------------------------------------------------
+            st.markdown("---")
+            equip_df = pd.read_sql_query(text("SELECT * FROM equipment WHERE client_id = :cid"), engine, params={"cid": int(selected_client_id)})
+            
+            st.subheader(f"🖨️ الأجهزة والمعدات التابعة لـ {c_info['name']}")
+            if not equip_df.empty:
                 equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
                 st.dataframe(equip_df[['brand', 'model', 'serial_number', 'sla_type', 'pm_visits_count', 'حالة العقد']].rename(columns={'pm_visits_count': 'الزيارات الدورية السنوية'}), use_container_width=True)
                 
