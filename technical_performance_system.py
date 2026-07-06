@@ -697,175 +697,66 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
     sla_list_db = sla_df_opts['name'].tolist() if not sla_df_opts.empty else ["عقد افتراضي"]
     extended_sla_list = sla_list_db + ["+ إضافة نوع عقد جديد يدوياً..."]
 
-    with tab1:
-        clients_df = pd.read_sql_query(text("SELECT * FROM clients ORDER BY id"), engine)
-        if not clients_df.empty:
-            client_dict = {row['name']: row['id'] for _, row in clients_df.iterrows()}
-            selected_client_id = client_dict[st.selectbox("🔍 ابحث عن عميل بالمنظومة لاستعراض ملفه:", list(client_dict.keys()))]
-            c_info = clients_df[clients_df['id'] == selected_client_id].iloc[0]
-            
-            with st.expander(f"✏️ تعديل بيانات الملف الأساسي للعميل ({c_info['name']})", expanded=False):
-                with st.form("edit_client_form"):
-                    col_c1, col_c2 = st.columns(2)
-                    with col_c1:
-                        new_name = st.text_input("اسم العميل / الشركة *:", value=c_info['name'])
-                        new_address = st.text_input("العنوان:", value=c_info['address'] or "")
-                        new_contact = st.text_input("الشخص المسؤول للتنسيق:", value=c_info['contact_person'] or "")
-                    with col_c2:
-                        new_phone = st.text_input("رقم الهاتف الأرضي أو المحمول:", value=c_info['phone'] or "")
-                        new_email = st.text_input("البريد الإلكتروني للعميل:", value=c_info['email'] or "")
-                        new_notes = st.text_input("ملاحظات تنظيمية خاصة بالمنشأة:", value=c_info['notes'] or "")
-                    if st.form_submit_button("حفظ الملف المحدث سحابيّاً"):
-                        if new_name:
-                            try:
-                                query_cl_up = "UPDATE clients SET name=:name, address=:addr, phone=:phone, email=:email, contact_person=:cp, notes=:notes WHERE id=:id"
-                                with engine.begin() as conn_cl_up:
-                                    conn_cl_up.execute(text(query_cl_up), {"name": new_name, "addr": new_address, "phone": new_phone, "email": new_email, "cp": new_contact, "notes": new_notes, "id": int(selected_client_id)})
-                                st.success("✅ تم تحديث بروفايل العميل بنجاح!")
-                                time.sleep(0.3)
-                                st.rerun()
-                            except:
-                                st.error("❌ هذا الاسم مسجل لجهة أو عميل آخر بالفعل في النظام.")
-                        else:
-                            st.error("اسم العميل أو الجهة إلزامي.")
-            
-            st.markdown("---")
-            equip_df = pd.read_sql_query(text("SELECT * FROM equipment WHERE client_id = :cid"), engine, params={"cid": int(selected_client_id)})
-            
-            st.subheader(f"🖨️ الأجهزة والمعدات التابعة لـ {c_info['name']}")
-            if not equip_df.empty:
-                # --- هذا هو التعديل الجذري لحل مشكلة الحروف المقطوعة في الجدول ---
-                equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
-                
-                display_equip_df = equip_df[['brand', 'model', 'serial_number', 'sla_type', 'pm_visits_count', 'حالة العقد']].copy()
-                display_equip_df.columns = ['الماركة', 'الموديل', 'الرقم التسلسلي (S/N)', 'نوع العقد (SLA)', 'الزيارات الدورية السنوية', 'حالة العقد']
-                
-                st.dataframe(display_equip_df, use_container_width=True)
-                # -----------------------------------------------------------------
-            st.markdown("---")
-            equip_df = pd.read_sql_query(text("SELECT * FROM equipment WHERE client_id = :cid"), engine, params={"cid": int(selected_client_id)})
-            
-            st.subheader(f"🖨️ الأجهزة والمعدات التابعة لـ {c_info['name']}")
-            if not equip_df.empty:
-                equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
-                st.dataframe(equip_df[['brand', 'model', 'serial_number', 'sla_type', 'pm_visits_count', 'حالة العقد']].rename(columns={'pm_visits_count': 'الزيارات الدورية السنوية'}), use_container_width=True)
-                
-                # تصدير أجهزة العميل المختار
-                st.download_button(f"📥 تصدير قائمة أجهزة {c_info['name']} لـ Excel", to_excel(equip_df), f"أجهزة_{c_info['name']}.xlsx", "application/vnd.ms-excel")
-
-                with st.expander("⚙️ تعديل بيانات تفصيلية أو نوع عقد أحد هذه الأجهزة"):
-                    eq_dict = {f"{r['brand']} {r['model']} - S/N: {r['serial_number']}": r['id'] for _, r in equip_df.iterrows()}
-                    eq_id = eq_dict[st.selectbox("اختر الجهاز المراد تعديله بدقة:", list(eq_dict.keys()))]
-                    eq_info = equip_df[equip_df['id'] == eq_id].iloc[0]
-                    
-                    if eq_info['contract_file'] and os.path.exists(str(eq_info['contract_file'])):
-                        with open(str(eq_info['contract_file']), "rb") as f:
-                            st.download_button("📥 تحميل نسخة العقد المؤرشفة للمعدّة", f, file_name=os.path.basename(str(eq_info['contract_file'])))
-                            
-                    with st.form("edit_eq_form"):
-                        col_u1, col_u2 = st.columns(2)
-                        with col_u1:
-                            u_brand = st.selectbox("الماركة المحورية *:", ["Xerox", "Canon", "Konica Minolta", "OKI", "Kardex Remstar"], index=["Xerox", "Canon", "Konica Minolta", "OKI", "Kardex Remstar"].index(eq_info['brand']) if eq_info['brand'] in ["Xerox", "Canon", "Konica Minolta", "OKI", "Kardex Remstar"] else 0)
-                            u_model = st.text_input("الموديل الدقيق *:", value=eq_info['model'])
-                            u_serial = st.text_input("الرقم التسلسلي المقيد *:", value=eq_info['serial_number'])
-                            idx = sla_list_db.index(eq_info['sla_type']) if eq_info['sla_type'] in sla_list_db else 0
-                            sla_choice = st.selectbox("نوع العقد الفعلي الحالي بقاعدة البيانات:", extended_sla_list, index=idx)
-                            final_sla = st.text_input("اكتب مسمى العقد البديل هنا:") if sla_choice == "+ إضافة نوع عقد جديد يدوياً..." else sla_choice
-                            
-                            p_options = ["نعم (من المكتب الرقمي)", "لا (من مورد آخر)"]
-                            u_purchased = st.selectbox("هل الشراء تم من المكتب الرقمي؟", p_options, index=p_options.index(eq_info['purchased_from_us']) if eq_info['purchased_from_us'] in p_options else 0)
-                            u_vendor = st.text_input("مورد خارجي بديل (إن وجد):", value=eq_info['third_party_vendor'] or "")
-                        with col_u2:
-                            u_building = st.text_input("المبنى/البلوك الميداني:", value=eq_info['location_building'] or "")
-                            u_floor = st.text_input("الطابق/الدور المتموضع به:", value=eq_info['location_floor'] or "")
-                            u_dept = st.text_input("القسم/الغرفة الإدارية المحددة:", value=eq_info['location_department'] or "")
-                            u_pm_count = st.number_input("الزيارات الوقائية المطلوبة سنوياً:", min_value=0, max_value=12, value=int(eq_info['pm_visits_count'] or 0))
-                        
+with tab1:
+    clients_df = pd.read_sql_query(text("SELECT * FROM clients ORDER BY id"), engine)
+    if not clients_df.empty:
+        client_dict = {row['name']: row['id'] for _, row in clients_df.iterrows()}
+        selected_client_id = client_dict[st.selectbox("🔍 ابحث عن عميل بالمنظومة لاستعراض ملفه:", list(client_dict.keys()))]
+        c_info = clients_df[clients_df['id'] == selected_client_id].iloc[0]
+        
+        with st.expander(f"✏️ تعديل بيانات الملف الأساسي للعميل ({c_info['name']})", expanded=False):
+            with st.form("edit_client_form"):
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    new_name = st.text_input("اسم العميل / الشركة *:", value=c_info['name'])
+                    new_address = st.text_input("العنوان:", value=c_info['address'] or "")
+                    new_contact = st.text_input("الشخص المسؤول للتنسيق:", value=c_info['contact_person'] or "")
+                with col_c2:
+                    new_phone = st.text_input("رقم الهاتف الأرضي أو المحمول:", value=c_info['phone'] or "")
+                    new_email = st.text_input("البريد الإلكتروني للعميل:", value=c_info['email'] or "")
+                    new_notes = st.text_input("ملاحظات تنظيمية خاصة بالمنشأة:", value=c_info['notes'] or "")
+                if st.form_submit_button("حفظ الملف المحدث سحابيّاً"):
+                    if new_name:
                         try:
-                            curr_exp = datetime.strptime(str(eq_info['sla_expiration_date']), "%Y-%m-%d").date()
+                            query_cl_up = "UPDATE clients SET name=:name, address=:addr, phone=:phone, email=:email, contact_person=:cp, notes=:notes WHERE id=:id"
+                            with engine.begin() as conn_cl_up:
+                                conn_cl_up.execute(text(query_cl_up), {"name": new_name, "addr": new_address, "phone": new_phone, "email": new_email, "cp": new_contact, "notes": new_notes, "id": int(selected_client_id)})
+                            st.success("✅ تم تحديث بروفايل العميل بنجاح!")
+                            time.sleep(0.3)
+                            st.rerun()
                         except:
-                            curr_exp = datetime.now().date() + timedelta(days=365)
-                            
-                        u_exp_date = st.date_input("تاريخ انتهاء غطاء صيانة العقد المبرم:", curr_exp)
-                        uploaded_contract = st.file_uploader("تغيير/تحديث الملف الرقمي لنسخة العقد الممسوحة ضوئياً", type=['pdf', 'jpg', 'png'])
-                        
-                        if st.form_submit_button("اعتماد وحفظ تعديلات المعدّة"):
-                            if u_model and u_serial and final_sla:
-                                if final_sla not in sla_list_db and sla_choice == "+ إضافة نوع عقد جديد يدوياً...":
-                                    with engine.begin() as conn_s_add:
-                                        conn_s_add.execute(text("INSERT INTO sla_types (name) VALUES (:name) ON CONFLICT DO NOTHING"), {"name": final_sla})
-                                contract_path = eq_info['contract_file']
-                                if uploaded_contract:
-                                    contract_path = save_uploaded_file(uploaded_contract, "uploads/contracts", f"eq_{eq_id}")
-                                try:
-                                    query_up_eq = """
-                                        UPDATE equipment SET brand=:brand, model=:model, serial_number=:sn, sla_type=:sla, sla_expiration_date=:exp, contract_file=:file,
-                                        location_building=:bld, location_floor=:flr, location_department=:dept, pm_visits_count=:pm, purchased_from_us=:pf, third_party_vendor=:tp WHERE id=:id
-                                    """
-                                    with engine.begin() as conn_eq_up:
-                                        conn_eq_up.execute(text(query_up_eq), {
-                                            "brand": u_brand, "model": u_model, "sn": u_serial, "sla": final_sla, "exp": str(u_exp_date), "file": contract_path,
-                                            "bld": u_building, "flr": u_floor, "dept": u_dept, "pm": int(u_pm_count), "pf": u_purchased, "tp": u_vendor, "id": int(eq_id)
-                                        })
-                                    st.success("✅ تم تحديث تفاصيل كرت المعدّة على قاعدة البيانات الموحدة!")
-                                    time.sleep(0.3)
-                                    st.rerun()
-                                except IntegrityError:
-                                    st.error("❌ الرقم التسلسلي (S/N) مكرر ومسجل لجهاز آخر بالمنظومة، يرجى التثبت!")
-            else:
-                st.info("لا توجد أجهزة مسجلة ومربوطة بهذا العميل حتى الآن.")
-                
-            with st.expander("➕ إضافة معدّة/جهاز جديد وربطه بهذا العميل مباشرة"):
-                with st.form("add_eq_to_client"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        brand = st.selectbox("الماركة الفنية *:", ["Xerox", "Canon", "Konica Minolta", "OKI", "Kardex Remstar"])
-                        model = st.text_input("الموديل *:")
-                        s_num = st.text_input("الرقم التسلسلي المحفور (S/N) *:")
-                        purchased = st.selectbox("هل تم التوريد عبر المكتب الرقمي؟ *", ["نعم (من المكتب الرقمي)", "لا (من مورد آخر)"])
-                        vendor = st.text_input("اسم المورد البديل إن وجد:")
-                    with c2:
-                        building = st.text_input("المبنى / البلوك الإنشائي:")
-                        dept = st.text_input("القسم الوظيفي الداخلي:")
-                        pm_count = st.number_input("الزيارات الدورية المطلوبة سنوياً لتفعيل الـ PM:", min_value=0, max_value=12, value=0)
-                    
-                    col_sla1, col_sla2 = st.columns(2)
-                    with col_sla1:
-                        sla_choice_new = st.selectbox("تأطير نوع العقد الحاكم:", extended_sla_list)
-                        final_sla_new = st.text_input("اكتب اسم العقد غير المدرج بالقائمة:") if sla_choice_new == "+ إضافة نوع عقد جديد يدوياً..." else sla_choice_new
-                    with col_sla2:
-                        ins_date = st.date_input("تاريخ التركيب الفعلي وتشغيل الضمان:")
-                        exp_date = st.date_input("تاريخ انتهاء غطاء الصيانة والعقد المبرم المعتمد:", datetime.now().date() + timedelta(days=365))
-                    new_contract_file = st.file_uploader("تحميل المنسوخ الضوئي لملف العقد الرسمي إن توفر", type=['pdf', 'jpg', 'png'])
-                    
-                    if st.form_submit_button("حفظ وإدراج كرت المعدّة الجديد"):
-                        if model and s_num and final_sla_new:
-                            if final_sla_new not in sla_list_db and sla_choice_new == "+ إضافة نوع عقد جديد يدوياً...":
-                                with engine.begin() as conn_s_in:
-                                    conn_s_in.execute(text("INSERT INTO sla_types (name) VALUES (:name) ON CONFLICT DO NOTHING"), {"name": final_sla_new})
-                            try:
-                                contract_path = save_uploaded_file(new_contract_file, "uploads/contracts", f"new_eq_{int(time.time())}") if new_contract_file else None
-                                query_in_eq = """
-                                    INSERT INTO equipment (client_id, brand, model, serial_number, installation_date, sla_type, sla_expiration_date, contract_file, 
-                                    location_building, location_department, pm_visits_count, purchased_from_us, third_party_vendor) 
-                                    VALUES (:cid, :brand, :model, :sn, :ins, :sla, :exp, :file, :bld, :dept, :pm, :pf, :tp)
-                                """
-                                with engine.begin() as conn_eq_in:
-                                    conn_eq_in.execute(text(query_in_eq), {
-                                        "cid": int(selected_client_id), "brand": brand, "model": model, "sn": s_num, "ins": str(ins_date),
-                                        "sla": final_sla_new, "exp": str(exp_date), "file": contract_path, "bld": building, "dept": dept,
-                                        "pm": int(pm_count), "pf": purchased, "tp": vendor
-                                    })
-                                st.success("✅ تم حفظ وإدراج المعدّة وربطها بملف العميل بنجاح!")
-                                time.sleep(0.3)
-                                st.rerun()
-                            except IntegrityError:
-                                st.error("❌ الرقم التسلسلي مكرر ومستعمل مع معدّة أخرى، يرجى المراجعة والتأكد!")
-                        else:
-                            st.warning("يرجى التأكد من ملء الموديل، السيريال، ونوع العقد لإتمام الإجراء.")
+                            st.error("❌ هذا الاسم مسجل لجهة أو عميل آخر بالفعل في النظام.")
+                    else:
+                        st.error("اسم العميل أو الجهة إلزامي.")
+        
+        st.markdown("---")
+        equip_df = pd.read_sql_query(text("SELECT * FROM equipment WHERE client_id = :cid"), engine, params={"cid": int(selected_client_id)})
+        
+        if not equip_df.empty:
+            st.markdown(f"### 🖨️ الأجهزة والمعدات التابعة لـ {c_info['name']}")
+            
+            # 1. حساب حالة العقد
+            equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
+            
+            # 2. بناء واستخلاص الأعمدة المطلوبة وتسميتها بشكل صريح باللغة العربية
+            display_equip_df = equip_df[['brand', 'model', 'serial_number', 'sla_type', 'pm_visits_count', 'حالة العقد']].copy()
+            display_equip_df.columns = ['الماركة', 'الموديل', 'الرقم التسلسلي (S/N)', 'نوع العقد (SLA)', 'الزيارات الدورية السنوية', 'حالة العقد']
+            
+            # 3. إجبار محاذاة النص داخل الخلايا والعناوين لليمين (RTL) برمجياً عبر الـ Styler
+            styled_df = display_equip_df.style.set_properties(**{
+                'text-align': 'right',
+                'direction': 'rtl'
+            }).set_table_styles([
+                {'selector': 'th', 'props': [('text-align', 'right'), ('direction', 'rtl')]}
+            ])
+            
+            # 4. عرض الجدول المصحح والمنسق يميناً مرة واحدة فقط
+            st.dataframe(styled_df, use_container_width=True)
+            
+            # 5. زر التصدير إلى إكسل
+            st.download_button(f"📥 تصدير قائمة أجهزة {c_info['name']} لـ Excel", to_excel(equip_df), f"أجهزة_{c_info['name']}.xlsx", "application/vnd.ms-excel")
         else:
-            st.warning("المستودع الرقمي السحابي فارغ من العملاء، يرجى إضافة عميل أولاً بالتبويب الجانبي.")
-
+            st.info("لا توجد أجهزة مسجلة ومربوطة بهذا العميل حتى الآن.")
     with tab2:
         with st.form("add_new_client"):
             st.write("تسجيل وإدراج عميل/شركة جديدة بملف متكامل ومستقل:")
