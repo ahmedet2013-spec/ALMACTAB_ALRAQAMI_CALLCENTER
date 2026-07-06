@@ -757,6 +757,7 @@ with tab1:
             st.download_button(f"📥 تصدير قائمة أجهزة {c_info['name']} لـ Excel", to_excel(equip_df), f"أجهزة_{c_info['name']}.xlsx", "application/vnd.ms-excel")
         else:
             st.info("لا توجد أجهزة مسجلة ومربوطة بهذا العميل حتى الآن.")
+
     with tab2:
         with st.form("add_new_client"):
             st.write("تسجيل وإدراج عميل/شركة جديدة بملف متكامل ومستقل:")
@@ -790,9 +791,14 @@ with tab1:
             all_eq['موقع الجهاز بالتفصيل'] = all_eq['location_building'].fillna('') + " - " + all_eq['location_department'].fillna('')
             
             st.subheader("📋 الجرد العام والشامل لجميع المعدّات السحابية")
-            st.dataframe(all_eq[['client_name', 'brand', 'model', 'serial_number', 'موقع الجهاز بالتفصيل', 'sla_type', 'pm_visits_count', 'حالة العقد']].rename(columns={'client_name': 'العميل المالك', 'pm_visits_count': 'الزيارات الدورية السنوية'}), use_container_width=True)
             
-            # أدوات تصدير الجرد العام لجميع الأجهزة والشركات
+            # ضبط التنسيق العربي للجدول العام أيضاً
+            display_all_eq = all_eq[['client_name', 'brand', 'model', 'serial_number', 'موقع الجهاز بالتفصيل', 'sla_type', 'pm_visits_count', 'حالة العقد']].copy()
+            display_all_eq.columns = ['العميل المالك', 'الماركة', 'الموديل', 'الرقم التسلسلي', 'الموقع التفصيلي', 'نوع العقد', 'الزيارات السنوية', 'حالة العقد']
+            
+            styled_all_df = display_all_eq.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'right'), ('direction', 'rtl')]}])
+            st.dataframe(styled_all_df, use_container_width=True)
+            
             ex_eq1, ex_eq2 = st.columns(2)
             with ex_eq1:
                 st.download_button("📥 تصدير الجرد العام للأجهزة لـ Excel", to_excel(all_eq), "الجرد_العام_للمعدات.xlsx", "application/vnd.ms-excel")
