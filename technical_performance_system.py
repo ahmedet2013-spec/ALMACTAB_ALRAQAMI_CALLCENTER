@@ -7,7 +7,7 @@ import time
 import io
 from sqlalchemy import create_engine, text
 
-# --- الأمان والاتصال السحابي الموحد (Connection Pooling IPv4) ---
+# --- الاتصال السحابي الآمن عبر التجميع ---
 DB_URL = st.secrets["DB_URL"]
 
 def get_engine():
@@ -15,14 +15,22 @@ def get_engine():
 
 engine = get_engine()
 
-# ضبط إعدادات الصفحة والتصميم الداعم لـ RTL بالكامل
+# التحقق من وجود وتأسيس الأعمدة المتقدمة في قاعدة البيانات منعاً لانهيار التطبيق
+with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE technicians ADD COLUMN IF NOT EXISTS city TEXT;"))
+    conn.execute(text("ALTER TABLE technicians ADD COLUMN IF NOT EXISTS image_path TEXT;"))
+    conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_coverage TEXT;"))
+    conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_value TEXT;"))
+    conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_duration TEXT;"))
+
 st.set_page_config(page_title="منظومة إدارة الأداء الفني - شركة المكتب الرقمي", page_icon="🛠️", layout="wide")
 
+# تطبيق مظهر الـ RTL الشامل والخطوط العربية الأنيقة
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
     
-    html, body, [data-testid="stSidebar"], .stApp, p, div, span, label {
+    html, body, [data-testid="stSidebar"], .stApp, p, div, span, label, input, select, textarea {
         font-family: 'Tajawal', sans-serif;
         direction: RTL !important;
         text-align: right !important;
@@ -38,31 +46,21 @@ st.markdown("""
         text-align: right !important;
     }
     
-    th {
-        background-color: #1E3A8A !important;
-        color: white !important;
-        text-align: right !important;
-    }
-    
-    td {
-        text-align: right !important;
-    }
-    
     .star-card {
         background-color: #FFFDF0;
         padding: 20px;
-        border-radius: 10px;
+        border-radius: 12px;
         border: 2px solid #FBBF24;
-        border-right: 10px solid #FBBF24;
+        border-right: 12px solid #FBBF24;
         margin-bottom: 25px;
     }
     
     .worst-card {
         background-color: #FEF2F2;
         padding: 20px;
-        border-radius: 10px;
+        border-radius: 12px;
         border: 2px solid #EF4444;
-        border-right: 10px solid #EF4444;
+        border-right: 12px solid #EF4444;
         margin-bottom: 25px;
     }
     
@@ -79,104 +77,78 @@ st.markdown("""
 if not os.path.exists("uploads/tech_images"):
     os.makedirs("uploads/tech_images")
 
-# --- دالة حساب حالة العقد والأيام بدقة ---
+# --- الدوال المحورية المساعدة ---
 def calculate_sla_status(exp_date_str):
-    if not exp_date_str: 
-        return "غير مححدد"
+    if not exp_date_str: return "غير محدد"
     try:
         exp_date = pd.to_datetime(exp_date_str).date()
-        today = datetime.now().date()
-        delta = (exp_date - today).days
-        if delta > 30: 
-            return f"ساري المفعول (متبقي {delta} يوم)"
-        elif 0 < delta <= 30:
-            return f"شارف على الانتهاء (متبقي {delta} يوم فقط)"
-        elif delta == 0: 
-            return "ينتهي اليوم"
-        else: 
-            return f"منتهي الصلاحية (منذ {abs(delta)} يوم)"
-    except: 
-        return "صيغة غير صحيحة"
+        delta = (exp_date - datetime.now().date()).days
+        if delta > 30: return f"🟢 ساري المفعول (متبقي {delta} يوم)"
+        elif 0 < delta <= 30: return f"🟡 شارف على الانتهاء (متبقي {delta} يوم)"
+        else: return f"🔴 منتهي الصلاحية (منذ {abs(delta)} يوم)"
+    except: return "صيغة غير صحيحة"
 
 def to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='تقرير_المكتب_الرقمي')
+        df.to_excel(writer, index=False, sheet_name='التقرير')
     return output.getvalue()
 
 def to_csv_printable(df):
     return df.to_csv(index=False).encode('utf-8-sig')
 
-# --- محرك الأداء المقاوم لغياب الأعمدة ---
+# --- محرك احتساب كفاءة المهندسين الشهري ---
 def get_performance_extremes():
-    query = "SELECT * FROM tickets"
-    df_tk = pd.read_sql_query(text(query), engine)
-    query_tech = "SELECT * FROM technicians"
-    df_th = pd.read_sql_query(text(query_tech), engine)
+    df_tk = pd.read_sql_query(text("SELECT * FROM tickets"), engine)
+    df_th = pd.read_sql_query(text("SELECT * FROM technicians"), engine)
     
     if df_tk.empty or df_th.empty:
         if not df_th.empty:
-            first = df_th.iloc[0]
-            return {"name": first['name'], "image": first.get('image_path', ''), "is_estimated": True, "stats": "لا توجد إحصائيات صيانة مسجلة له هذا الشهر حتى الآن"}, None, pd.DataFrame()
+            return {"name": df_th.iloc[0]['name'], "image": df_th.iloc[0].get('image_path', ''), "is_estimated": True}, None, pd.DataFrame()
         return None, None, pd.DataFrame()
         
-    df_all = df_tk.merge(df_th, left_on='tech_id', right_on='id', suffixes=('_ticket', '_tech'))
-    current_month = datetime.now().strftime("%Y-%m")
+    df_all = df_tk.merge(df_th, left_on='tech_id', right_on='id', suffixes=('_tk', '_tech'))
     df_all['time_reported'] = pd.to_datetime(df_all['time_reported'])
-    df_filtered = df_all[df_all['time_reported'].dt.strftime("%Y-%m") == current_month]
+    df_filtered = df_all[df_all['time_reported'].dt.strftime("%Y-%m") == datetime.now().strftime("%Y-%m")]
     
     if df_filtered.empty:
-        first = df_th.iloc[0]
-        return {"name": first['name'], "image": first.get('image_path', ''), "is_estimated": True, "stats": "لا توجد إغلاقات مسجلة له هذا الشهر حتى الآن"}, None, pd.DataFrame()
+        return {"name": df_th.iloc[0]['name'], "image": df_th.iloc[0].get('image_path', ''), "is_estimated": True}, None, pd.DataFrame()
         
-    tech_stats = df_filtered.groupby('name').agg(
-        total_visits=('id_ticket', 'count'),
+    stats = df_filtered.groupby('name').agg(
+        total_visits=('id_tk', 'count'),
         first_time_fixes=('first_time_fix', 'sum'),
-        pending_count=('status_ticket', lambda x: x.str.contains('انتظار').sum())
-    ).reset_index()
+        pending_count=('status_tk', lambda x: x.str.contains('انتظار').sum())
+    ).reset_index().merge(df_th[['name', 'image_path']], on='name', how='left')
     
-    # دمج مسار الصورة بأمان
-    tech_stats = tech_stats.merge(df_th[['name', 'image_path']], on='name', how='left')
-    tech_stats['score'] = (tech_stats['total_visits'] * 5) + (tech_stats['first_time_fixes'] * 10) - (tech_stats['pending_count'] * 4)
+    stats['score'] = (stats['total_visits'] * 5) + (stats['first_time_fixes'] * 10) - (stats['pending_count'] * 4)
+    sorted_stats = stats.sort_values(by='score', ascending=False)
     
-    sorted_stats = tech_stats.sort_values(by='score', ascending=False)
-    winner_row = sorted_stats.iloc[0]
-    worst_row = sorted_stats.iloc[-1] if len(sorted_stats) > 1 else None
-    
-    winner = {"name": winner_row['name'], "image": winner_row.get('image_path', ''), "total_visits": winner_row['total_visits'], "first_time_fixes": winner_row['first_time_fixes']}
+    winner = {"name": sorted_stats.iloc[0]['name'], "image": sorted_stats.iloc[0].get('image_path', ''), "visits": sorted_stats.iloc[0]['total_visits'], "ftf": sorted_stats.iloc[0]['first_time_fixes']}
     worst = None
-    if worst_row:
-        worst = {"name": worst_row['name'], "image": worst_row.get('image_path', ''), "total_visits": worst_row['total_visits'], "pending_count": worst_row['pending_count']}
-        
+    if len(sorted_stats) > 1:
+        worst = {"name": sorted_stats.iloc[-1]['name'], "image": sorted_stats.iloc[-1].get('image_path', ''), "visits": sorted_stats.iloc[-1]['total_visits'], "pending": sorted_stats.iloc[-1]['pending_count']}
     return winner, worst, sorted_stats
 
-if 'selected_sn' not in st.session_state:
-    st.session_state['selected_sn'] = ""
-
-if 'logged_in' not in st.session_state: 
-    st.session_state['logged_in'] = False
-
+# --- نظام الحماية والتحقق من الهوية ---
+if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if not st.session_state['logged_in']:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if os.path.exists("MAC logo resized.png"): 
-            st.image("MAC logo resized.png", use_container_width=True)
+        if os.path.exists("MAC logo resized.png"): st.image("MAC logo resized.png", use_container_width=True)
         st.markdown("<h2 style='text-align: center;'>تسجيل الدخول للمنظومة</h2>", unsafe_allow_html=True)
         with st.form("login_form"):
             username = st.text_input("اسم المستخدم")
             password = st.text_input("كلمة المرور", type="password")
-            if st.form_submit_button("دخول للمنظومة"):
+            if st.form_submit_button("دخول آمن"):
                 if username == "Ahmed" and password == "admin123":
-                    st.session_state['logged_in'] = True
-                    st.rerun()
-                else: st.error("❌ بيانات الدخول غير صحيحة.")
+                    st.session_state['logged_in'] = True; st.rerun()
+                else: st.error("❌ البيانات غير صحيحة.")
     st.stop()
 
-if os.path.exists("MAC logo resized.png"):
-    st.sidebar.image("MAC logo resized.png", use_container_width=True)
-
+# --- القائمة الجانبية الحاكمة ---
+if os.path.exists("MAC logo resized.png"): st.sidebar.image("MAC logo resized.png", use_container_width=True)
 st.sidebar.title("🛠️ المكتب الرقمي")
-menu = st.sidebar.radio("انتقل إلى القائمة الميدانية:", [
+menu = st.sidebar.radio("القائمة الميدانية الرئيسية:", [
     "📊 لوحة التحكم والأداء الشهري", 
     "🔍 البحث الشامل عن جهاز (S/N)",
     "➕ تسجيل بلاغ صيانة جديد", 
@@ -187,268 +159,296 @@ menu = st.sidebar.radio("انتقل إلى القائمة الميدانية:", 
     "⚙️ إعدادات أنواع العقود"
 ])
 
-if st.sidebar.button("🚪 تسجيل الخروج الآمن"):
-    st.session_state['logged_in'] = False
-    st.rerun()
-
-# --- 1. لوحة التحكم ---
+# --- 1. لوحة التحكم والأداء الشهري ---
 if menu == "📊 لوحة التحكم والأداء الشهري":
     st.title("📊 الملخص الشهري وتحليل الأداء الفني")
     winner, worst, performance_df = get_performance_extremes()
     
-    c1, c2 = st.columns(2)
-    with c1:
+    col_w1, col_w2 = st.columns(2)
+    with col_w1:
         if winner:
             st.markdown('<div class="star-card">', unsafe_allow_html=True)
-            col_img, col_txt = st.columns([1, 2])
-            with col_img:
-                w_img = winner.get('image', '')
-                if w_img and os.path.exists(str(w_img)): st.image(str(w_img), width=110)
-                else: st.markdown("<h1 style='font-size:60px; margin:0;'>🌟</h1>", unsafe_allow_html=True)
-            with col_txt:
-                if "is_estimated" in winner:
-                    st.markdown(f"### 🌟 الموظف المثالي المتوقع: {winner['name']}")
-                    st.write(winner['stats'])
-                else:
-                    st.markdown(f"### 🌟 موظف الشهر المثالي: {winner['name']} ⭐")
-                    st.write(f"📊 **إجمالي الزيارات:** {winner['total_visits']} | **الإصلاح الفوري:** {winner['first_time_fixes']}")
+            img_c, txt_c = st.columns([1, 2])
+            with img_c:
+                if winner.get('image') and os.path.exists(str(winner['image'])): st.image(str(winner['image']), width=110)
+                else: st.markdown("<h1 style='font-size:55px; margin:0;'>🌟</h1>", unsafe_allow_html=True)
+            with txt_c:
+                st.markdown(f"### 🌟 المهندس المتميز: {winner['name']} ⭐")
+                if "is_estimated" not in winner: st.write(f"📊 زيارات: {winner['visits']} | إصلاح فوري: {winner['ftf']}")
             st.markdown('</div>', unsafe_allow_html=True)
             
-    with c2:
+    with col_w2:
         if worst:
             st.markdown('<div class="worst-card">', unsafe_allow_html=True)
-            col_img2, col_txt2 = st.columns([1, 2])
-            with col_img2:
-                wr_img = worst.get('image', '')
-                if wr_img and os.path.exists(str(wr_img)): st.image(str(wr_img), width=110)
-                else: st.markdown("<h1 style='font-size:60px; margin:0;'>⚠️</h1>", unsafe_allow_html=True)
-            with col_txt2:
-                st.markdown(f"### ⚠️ الأقل أداءً هذا الشهر: {worst['name']}")
-                st.write(f"📊 **إجمالي الزيارات:** {worst['total_visits']} | **المعلقة لقطع الغيار:** {worst['pending_count']}")
+            img_c2, txt_c2 = st.columns([1, 2])
+            with img_c2:
+                if worst.get('image') and os.path.exists(str(worst['image'])): st.image(str(worst['image']), width=110)
+                else: st.markdown("<h1 style='font-size:55px; margin:0;'>⚠️</h1>", unsafe_allow_html=True)
+            with txt_c2:
+                st.markdown(f"### ⚠️ الأقل أداءً: {worst['name']} 👎")
+                st.write(f"📊 زيارات: {worst['visits']} | معلقة لقطع الغيار: {worst['pending']}")
             st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="worst-card">### ⚠️ الأقل أداءً هذا الشهر:<br><p>لا توجد بيانات متباينة للفريق حالياً.</p></div>', unsafe_allow_html=True)
 
     if not performance_df.empty:
-        fig = px.bar(performance_df, x='name', y='score', title="نقاط الأداء المقارنة للفريق", labels={'name': 'المهندس', 'score': 'النقاط'})
+        fig = px.bar(performance_df, x='name', y='score', title="منحنى الكفاءة الإجمالي للفريق الحلي", color='score')
         st.plotly_chart(fig, use_container_width=True)
-        st.download_button("📥 تصدير الملخص الشهري لـ Excel", to_excel(performance_df), "الملخص_الشهري.xlsx")
 
 # --- 2. البحث الشامل ---
 elif menu == "🔍 البحث الشامل عن جهاز (S/N)":
-    st.title("🔍 بطاقة تعريف الآلة وبروفايلها الذكي الموحد")
-    search_sn = st.text_input("أدخل الرقم التسلسلي (S/N) للآلة للتحقق الفوري:", value=st.session_state['selected_sn']).strip()
-    
-    if search_sn:
-        query = "SELECT e.*, c.name as client_name, c.phone as client_phone FROM equipment e JOIN clients c ON e.client_id = c.id WHERE e.serial_number = :sn"
-        eq_df = pd.read_sql_query(text(query), engine, params={"sn": search_sn})
+    st.title("🔍 بروفايل وبطاقة تعريف الآلة الذكية")
+    sn_input = st.text_input("أدخل الرقم التسلسلي (S/N) للآلة:").strip()
+    if sn_input:
+        eq_df = pd.read_sql_query(text("SELECT e.*, c.name as client_name FROM equipment e JOIN clients c ON e.client_id = c.id WHERE e.serial_number = :sn"), engine, params={"sn": sn_input})
         if not eq_df.empty:
             eq = eq_df.iloc[0]
             st.markdown(f"""
             <div style="background-color:#F8FAFC; padding:20px; border-radius:10px; border-right:8px solid #1E3A8A; line-height:1.8;">
-                <h3>🖥️ الموديل: {eq['brand']} {eq['model']}</h3>
-                <b>🏢 العميل:</b> {eq['client_name']} | <b>📞 الهاتف:</b> {eq['client_phone']}<br>
-                <b>🏷️ السيريال:</b> {eq['serial_number']} | <b>📅 التركيب:</b> {eq['installation_date']}<br>
-                <b>📜 العقد:</b> {eq['sla_type']} | <b>⏳ غطاء العقد:</b> {calculate_sla_status(eq['sla_expiration_date'])}<br>
-                <b>💼 شراء منا:</b> {eq['purchased_from_us']}
+                <h3>🖥️ الطراز: {eq['brand']} {eq['model']} (S/N: {eq['serial_number']})</h3>
+                <b>🏢 العميل:</b> {eq['client_name']} | <b>📜 نوع العقد:</b> {eq['sla_type']}<br>
+                <b>⏳ صلاحية العقد الفعلي:</b> {calculate_sla_status(eq['sla_expiration_date'])}<br>
+                <b>📦 ما يشمله العقد بالتفصيل:</b> {eq.get('contract_coverage', 'غير محدد')}<br>
+                <b>💰 القيمة والمدة السنوية:</b> {eq.get('contract_value', '---')} د.ل / {eq.get('contract_duration', '---')}
             </div>
             """, unsafe_allow_html=True)
-        else: st.error("⚠️ الرقم التسلسلي المدخل غير مسجل في قاعدة البيانات.")
+        else: st.error("⚠️ لم يتم العثور على الرقم التسلسلي.")
 
-# --- 3. تسجيل بلاغ جديد ---
+# --- 3. تسجيل بلاغ صيانة جديد ---
 elif menu == "➕ تسجيل بلاغ صيانة جديد":
-    st.title("➕ فتح وتوثيق بلاغ صيانة ميداني جديد")
+    st.title("➕ فتح وتوثيق بلاغ صيانة جديد")
     eq_rows = pd.read_sql_query(text("SELECT e.id, c.name as client_name, e.brand, e.model, e.serial_number FROM equipment e JOIN clients c ON e.client_id = c.id"), engine)
     tech_rows = pd.read_sql_query(text("SELECT id, name FROM technicians"), engine)
     
-    if eq_rows.empty or tech_rows.empty:
-        st.error("⚠️ يجب قيد أجهزة وفنيين أولاً في المنظومة.")
-    else:
-        equip_options = {f"{r['client_name']} - {r['brand']} {r['model']} (S/N: {r['serial_number']})": r['id'] for _, r in eq_rows.iterrows()}
-        selected_equip_label = st.selectbox("اختر الآلة المشكو منها:", list(equip_options.keys()))
-        eq_id_sel = equip_options[selected_equip_label]
+    if not eq_rows.empty and not tech_rows.empty:
+        equip_options = {f"{r['client_name']} - {r['brand']} {r['model']} ({r['serial_number']})": r['id'] for _, r in eq_rows.iterrows()}
+        selected_label = st.selectbox("اختر الآلة المشكو منها:", list(equip_options.keys()))
+        eq_id = equip_options[selected_label]
         
-        target_eq = pd.read_sql_query(text("SELECT e.*, c.name as client_name FROM equipment e JOIN clients c ON e.client_id = c.id WHERE e.id = :eid"), engine, params={"eid": int(eq_id_sel)}).iloc[0]
-        st.warning(f"🔍 **التحقق التلقائي للآلة:** نوع العقد: {target_eq['sla_type']} ({calculate_sla_status(target_eq['sla_expiration_date'])})")
+        target = pd.read_sql_query(text("SELECT * FROM equipment WHERE id = :id"), engine, params={"id": int(eq_id)}).iloc[0]
+        st.warning(f"🔍 التحقق التلقائي للعقد: {target['sla_type']} ({calculate_sla_status(target['sla_expiration_date'])})")
         
-        with st.form("new_ticket_form"):
+        with st.form("add_ticket_form"):
             col1, col2 = st.columns(2)
             with col1:
-                m_type = st.selectbox("نوع الآلة:", ["طابعة إنتاج ليزر", "طابعة عريضة", "منظومة أرشفة PLC"])
-                m_model = st.text_input("تأكيد الموديل:", value=f"{target_eq['brand']} {target_eq['model']}")
-                issue_type = st.selectbox("تصنيف العطل:", ["عطل ميكانيكي", "جودة ألوان", "خطأ في لوحة التحكم PLC"])
+                m_type = st.selectbox("نوع الآلة الآلي:", ["طابعة إنتاج ليزر", "طابعة عريضة ProStream", "منظومة أرشفة"])
+                m_model = st.text_input("تأكيد الموديل:", value=f"{target['brand']} {target['model']}")
+                i_type = st.text_input("نوع ونطاق العطل الحالي:")
             with col2:
-                priority = st.selectbox("مستوى حساسية العطل *:", ["استجابة سريعة فورية", "استجابة عادية"])
-                tech_name = st.selectbox("المهندس المسؤول عن المهمة *:", [r['name'] for _, r in tech_rows.iterrows()])
-                issue_desc = st.text_area("وصف مفصل للعطل:")
-                
-            if st.form_submit_button("إصدار وتثبيت البلاغ"):
-                tech_id_final = tech_rows[tech_rows['name'] == tech_name].iloc[0]['id']
-                t_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                priority = st.selectbox("حساسية الاستجابة والطلب:", ["استجابة سريعة فورية", "استجابة عادية"])
+                t_name = st.selectbox("المهندس المسؤول عن التنفيذ *:", [r['name'] for _, r in tech_rows.iterrows()])
+                desc = st.text_area("وصف مفصل للمشتكى التقني العابر:")
+            if st.form_submit_button("إصدار وتثبيت التذكرة"):
+                t_id = tech_rows[tech_rows['name'] == t_name].iloc[0]['id']
                 with engine.begin() as conn:
-                    conn.execute(text("INSERT INTO tickets (equipment_id, tech_id, issue_description, time_reported, status, first_time_fix, parts_replaced) VALUES (:eq_id, :tech_id, :desc, :time_rep, 'مفتوح / قيد المتابعة', 0, '')"),
-                                 {"eq_id": int(eq_id_sel), "tech_id": int(tech_id_final), "desc": f"[{priority}] {m_type} - {issue_type}: {issue_desc}", "time_rep": t_now})
-                st.success("🎉 تم فتح وتثبيت بلاغ الصيانة بنجاح وإسناده للمهندس!")
+                    conn.execute(text("INSERT INTO tickets (equipment_id, tech_id, issue_description, time_reported, status, first_time_fix, parts_replaced) VALUES (:eid, :tid, :desc, :time, 'مفتوح / قيد المتابعة', 0, '')"),
+                                 {"eid": int(eq_id), "tid": int(t_id), "desc": f"[{priority}] {m_type} - {i_type}: {desc}", "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+                st.success("🎉 تم فتح وتثبيت بلاغ الصيانة بنجاح في السحابة ومزامنة الوقت!")
 
 # --- 4. إدارة التذاكر والبلاغات ---
 elif menu == "🖥️ إدارة البلاغات والتذاكر":
-    st.title("🖥️ إدارة البلاغات وتحديث تذاكر الأعطال")
-    query_all_tk = "SELECT t.*, c.name as client_name, e.brand, e.model, e.serial_number, tech.name as tech_name FROM tickets t JOIN equipment e ON t.equipment_id = e.id JOIN clients c ON e.client_id = c.id JOIN technicians tech ON t.tech_id = tech.id ORDER BY t.id DESC"
-    df_all_tickets = pd.read_sql_query(text(query_all_tk), engine)
+    st.title("🖥️ إدارة البلاغات وتعديل التذاكر")
+    df_tk = pd.read_sql_query(text("SELECT t.*, c.name as client_name, e.serial_number FROM tickets t JOIN equipment e ON t.equipment_id = e.id JOIN clients c ON e.client_id = c.id ORDER BY t.id DESC"), engine)
     
-    if df_all_tickets.empty:
-        st.info("لا توجد بلاغات مسجلة.")
-    else:
-        ticket_dict = {f"بلاغ رقم {r['id']} - لعميل: {r['client_name']} (S/N: {r['serial_number']})": r['id'] for _, r in df_all_tickets.iterrows()}
-        sel_tk_label = st.selectbox("اختر البلاغ المراد تعديله أو تحديثه:", list(ticket_dict.keys()))
-        t_id_edit = ticket_dict[sel_tk_label]
-        c_tk = df_all_tickets[df_all_tickets['id'] == t_id_edit].iloc[0]
+    if not df_tk.empty:
+        tk_dict = {f"تذكرة رقم {r['id']} - {r['client_name']} ({r['serial_number']})": r['id'] for _, r in df_tk.iterrows()}
+        selected_tk = st.selectbox("اختر تذكرة صيانة لتحديثها أو تعديل أي حقل بها حالياً:", list(tk_dict.keys()))
+        tk_id = tk_dict[selected_tk]
+        tk_data = df_tk[df_tk['id'] == tk_id].iloc[0]
         
-        with st.form("edit_form"):
-            st.info(f"📆 **توقيت الإنشاء المعتمد:** {c_tk['time_reported']}")
-            u_desc = st.text_area("وصف العطل الحالي:", value=c_tk['issue_description'])
-            u_status = st.selectbox("تحديث حالة التذكرة:", ["مفتوح / قيد المتابعة", "قيد الانتظار لقطع الغيار", "مشغول لدى عميل", "مغلق"], index=["مفتوح / قيد المتابعة", "قيد الانتظار لقطع الغيار", "مشغول لدى عميل", "مغلق"].index(c_tk['status']) if c_tk['status'] in ["مفتوح / قيد المتابعة", "قيد الانتظار لقطع الغيار", "مشغول لدى عميل", "مغلق"] else 0)
-            u_parts = st.text_input("قطع الغيار المستبدلة:", value=c_tk['parts_replaced'] or "")
-            u_ftf = st.checkbox("تم الإصلاح من أول زيارة (First Time Fix)", value=bool(c_tk['first_time_fix']))
-            
-            if st.form_submit_button("حفظ التغييرات بالتذكرة"):
-                res_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if u_status == "مغلق" else c_tk['time_resolved']
+        with st.form("edit_ticket_form"):
+            u_desc = st.text_area("تعديل تفاصيل وصف العطل والموقع المعين:", value=tk_data['issue_description'])
+            u_status = st.selectbox("الحالة الحالية للبلاغ:", ["مفتوح / قيد المتابعة", "قيد الانتظار لقطع الغيار", "مشغول لدى عميل", "مغلق"], index=["مفتوح / قيد المتابعة", "قيد الانتظار لقطع الغيار", "مشغول لدى عميل", "مغلق"].index(tk_data['status']) if tk_data['status'] in ["مفتوح / قيد المتابعة", "قيد الانتظار لقطع الغيار", "مشغول لدى عميل", "مغلق"] else 0)
+            u_parts = st.text_input("تحديث قطع الغيار المستبدلة إن وجدت:", value=tk_data['parts_replaced'] or "")
+            if st.form_submit_button("اعتماد وحفظ البيانات المحدثة للتذكرة"):
                 with engine.begin() as conn:
-                    conn.execute(text("UPDATE tickets SET issue_description=:desc, status=:status, first_time_fix=:ftf, parts_replaced=:parts, time_resolved=:tres WHERE id=:id"),
-                                 {"desc": u_desc, "status": u_status, "ftf": 1 if u_ftf else 0, "parts": u_parts, "tres": res_time, "id": int(t_id_edit)})
-                st.success("✅ تم تحديث بيانات التذكرة بنجاح!")
+                    conn.execute(text("UPDATE tickets SET issue_description=:desc, status=:status, parts_replaced=:parts WHERE id=:id"), {"desc": u_desc, "status": u_status, "parts": u_parts, "id": int(tk_id)})
+                st.success("✅ تم تحديث كافة حقول البلاغ المختار بنجاح!")
                 st.rerun()
-
-        display_all_tk = df_all_tickets[['id', 'client_name', 'brand', 'model', 'serial_number', 'tech_name', 'status']].copy()
-        display_all_tk.columns = ['رقم التذكرة', 'العميل', 'الماركة', 'الموديل', 'السيريال (S/N)', 'المهندس المسؤول', 'الحالة']
-        st.dataframe(display_all_tk.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
 
 # --- 5. الزيارات الدورية ---
 elif menu == "📅 الزيارات الدورية (PM)":
     st.title("📅 لوحة تحكم ومراقبة الزيارات الوقائية (PM)")
-    query_pm = "SELECT p.id, c.name, e.brand, e.model, e.serial_number, p.scheduled_date, p.status FROM pm_visits p JOIN equipment e ON p.equipment_id = e.id JOIN clients c ON e.client_id = c.id ORDER BY p.scheduled_date ASC"
-    pm_df = pd.read_sql_query(text(query_pm), engine)
-    if not pm_df.empty:
-        pm_df.columns = ['رقم الزيارة', 'العميل', 'الماركة', 'الموديل', 'السيريال', 'تاريخ الزيارة', 'الحالة']
-        st.dataframe(pm_df.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
-    else: st.info("لا توجد زيارات وقائية مجدولة.")
+    df_pm = pd.read_sql_query(text("SELECT p.id, c.name as client_name, e.brand, e.model, e.serial_number, e.pm_visits_count, p.scheduled_date, p.status FROM pm_visits p JOIN equipment e ON p.equipment_id = e.id JOIN clients c ON e.client_id = c.id ORDER BY p.scheduled_date ASC"), engine)
+    if not df_pm.empty:
+        df_pm.columns = ['رقم الزيارة', 'العميل', 'الماركة', 'الموديل', 'السيريال (S/N)', 'الزيارات الدورية السنوية المجدولة', 'تاريخ الزيارة', 'الحالة']
+        st.write("📋 قائمة وجدول الزيارات الدورية الشامل المنعكس تلقائياً من مواصفات العقود:")
+        st.dataframe(df_pm, use_container_width=True)
+    else: st.info("لا توجد زيارات وقائية مجدولة حالياً.")
 
-# --- 6. ملفات العملاء والأجهزة ---
+# --- 6. إدارة العملاء والأجهزة (Profile) ---
 elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
     st.title("🗂️ ملفات العملاء والأجهزة الذكية")
-    tab1, tab2, tab3 = st.tabs(["🗂️ بروفايل العميل وأجهزته", "➕ عميل جديد", "📋 مستودع كل الأجهزة"])
+    tab1, tab2 = st.tabs(["🗂️ ملفات العملاء وجرد الأجهزة التابعة لهم", "➕ إضافة عميل/شركة جديدة"])
     
     with tab1:
         clients_df = pd.read_sql_query(text("SELECT * FROM clients ORDER BY id"), engine)
         if not clients_df.empty:
             client_dict = {row['name']: row['id'] for _, row in clients_df.iterrows()}
-            selected_client_id = client_dict[st.selectbox("🔍 ابحث عن عميل لاستعراض أجهزته وملفه:", list(client_dict.keys()))]
+            selected_client_id = client_dict[st.selectbox("ابحث عن عميل للوصول لكافة حقوله وأجهزته المعنية:", list(client_dict.keys()))]
             c_info = clients_df[clients_df['id'] == selected_client_id].iloc[0]
             
-            with st.expander(f"✏️ تعديل بيانات العميل ({c_info['name']})"):
-                with st.form("edit_client"):
-                    u_cl_name = st.text_input("اسم العميل *:", value=c_info['name'])
-                    u_cl_addr = st.text_input("العنوان:", value=c_info['address'] or "")
-                    if st.form_submit_button("حفظ التحديثات"):
-                        with engine.begin() as conn:
-                            conn.execute(text("UPDATE clients SET name=:name, address=:addr WHERE id=:id"), {"name": u_cl_name, "addr": u_cl_addr, "id": int(selected_client_id)})
-                        st.success("✅ تم التحديث بنجاح!")
-                        st.rerun()
-
-            equip_df = pd.read_sql_query(text("SELECT * FROM equipment WHERE client_id = :cid"), engine, params={"cid": int(selected_client_id)})
-            if not equip_df.empty:
-                st.markdown(f"### 🖨️ الأجهزة التابعة لـ {c_info['name']}")
-                equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
-                
-                display_equip_df = equip_df[['brand', 'model', 'serial_number', 'installation_date', 'sla_type', 'حالة العقد']].copy()
-                display_equip_df.columns = ['نوع الآلة', 'الموديل', 'الرقم التسلسلي (S/N)', 'تاريخ التركيب', 'نوع العقد', 'حالة العقد والسريان']
-                
-                st.dataframe(display_equip_df.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
-                st.download_button("📥 تصدير أجهزة العميل لـ Excel", to_excel(equip_df), f"أجهزة_{c_info['name']}.xlsx")
-            else: st.info("لا توجد أجهزة مسجلة لهذا العميل.")
-
-    with tab2:
-        with st.form("add_client"):
-            nc_name = st.text_input("اسم العميل أو الجهة بالكامل *:")
-            nc_addr = st.text_input("المقر والعنوان الميداني *:")
-            if st.form_submit_button("إدراج عميل جديد"):
-                if nc_name and nc_addr:
+            with st.form("edit_client_advanced"):
+                st.subheader("📝 تعديل وتحديث أي حقل من حقول بروفايل العميل الحالي:")
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    u_name = st.text_input("اسم العميل أو الجهة المختصة *:", value=c_info['name'])
+                    u_addr = st.text_input("العنوان والمقر الميداني المعتمد:", value=c_info['address'] or "")
+                    u_contact = st.text_input("اسم الشخص المسؤول والمنسق بالموقع:", value=c_info['contact_person'] or "")
+                with col_c2:
+                    u_phone = st.text_input("رقم هاتف المراسلات والتواصل الفوري:", value=c_info['phone'] or "")
+                    u_email = st.text_input("البريد الإلكتروني الموثق للشركة والوصول المعني:", value=c_info['email'] or "")
+                if st.form_submit_button("حفظ التغييرات الشاملة لبروفايل العميل"):
                     with engine.begin() as conn:
-                        conn.execute(text("INSERT INTO clients (name, address) VALUES (:name, :addr)"), {"name": nc_name, "addr": nc_addr})
-                    st.success("🎉 تم الحفظ بنجاح!")
+                        conn.execute(text("UPDATE clients SET name=:name, address=:addr, contact_person=:cp, phone=:phone, email=:email WHERE id=:id"),
+                                     {"name": u_name, "addr": u_addr, "cp": u_contact, "phone": u_phone, "email": u_email, "id": int(selected_client_id)})
+                    st.success("✅ تم تحديث وتعديل حقول ملف العميل بنجاح تام!")
                     st.rerun()
 
-    with tab3:
-        all_eq = pd.read_sql_query(text("SELECT c.name as client_name, e.* FROM equipment e JOIN clients c ON e.client_id = c.id ORDER BY e.id DESC"), engine)
-        if not all_eq.empty:
-            all_eq['حالة العقد'] = all_eq['sla_expiration_date'].apply(calculate_sla_status)
-            display_all_eq = all_eq[['client_name', 'brand', 'model', 'serial_number', 'sla_type', 'حالة العقد']].copy()
-            display_all_eq.columns = ['العميل المالك', 'نوع الآلة', 'الموديل', 'الرقم التسلسلي (S/N)', 'نوع العقد', 'حالة العقد']
-            st.dataframe(display_all_eq.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
+            st.markdown("---")
+            equip_df = pd.read_sql_query(text("SELECT * FROM equipment WHERE client_id = :cid"), engine, params={"cid": int(selected_client_id)})
+            if not equip_df.empty:
+                st.markdown(f"### 🖨️ قائمة الآلات الموجودة لدى العميل: {c_info['name']}")
+                equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
+                
+                # جرد الأجهزة الدقيق والشامل متضمناً مواصفات العقود الموسعة والزيارات
+                for _, machine in equip_df.iterrows():
+                    st.markdown(f"""
+                    <div style="background-color:#F8FAFC; padding:15px; border-radius:10px; border-right:6px solid #1E3A8A; margin-bottom:12px; line-height:1.7;">
+                        <b>🖥️ موديل ونوع الآلة:</b> {machine['brand']} {machine['model']} | <b>🏷️ الرقم التسلسلي (S/N):</b> {machine['serial_number']}<br>
+                        <b>📅 تاريخ التركيب الفعلي:</b> {machine['installation_date']} | <b>📜 نوع العقد:</b> {machine['sla_type']}<br>
+                        <b>⏳ حالة العقد والسريان بالأيام:</b> {machine['حالة العقد']}<br>
+                        <b>⚙️ عدد الزيارات الدورية السنوية (PM):</b> {machine.get('pm_visits_count', 0)} زيارة | <b>💰 قيمة العقد السنوية:</b> {machine.get('contract_value', '0')} د.ل
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    with st.expander(f"⚙️ تعديل وتحديث أي حقل من حقول الآلة (S/N: {machine['serial_number']}) في أي وقت:"):
+                        with st.form(f"edit_machine_{machine['id']}_form"):
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1:
+                                um_brand = st.text_input("تعديل الماركة:", value=machine['brand'])
+                                um_model = st.text_input("تعديل الموديل الدقيق للمعدة:", value=machine['model'])
+                                um_sla = st.text_input("تعديل مسمى ونطاق العقد المبرم:", value=machine['sla_type'])
+                                um_coverage = st.text_area("تعديل شمولية العقد وماذا يغطي من بنود:", value=machine.get('contract_coverage', ''))
+                            with col_m2:
+                                um_pm = st.number_input("تعديل إجمالي عدد الزيارات الدورية السنوية (PM):", min_value=0, max_value=24, value=int(machine.get('pm_visits_count', 0)))
+                                um_val = st.text_input("تعديل القيمة المالية السنوية للعقد (د.ل):", value=str(machine.get('contract_value', '0')))
+                                um_dur = st.text_input("تعديل مدة سريان العقد الحالية للآلة:", value=str(machine.get('contract_duration', 'سنة واحدة')))
+                                um_exp = st.date_input("تعديل تاريخ انتهاء الصلاحية والغلق للضمان:", value=pd.to_datetime(machine['sla_expiration_date']).date())
+                            if st.form_submit_button("اعتماد وحفظ كافة الحقول المعدلة للآلة"):
+                                with engine.begin() as conn:
+                                    conn.execute(text("UPDATE equipment SET brand=:b, model=:m, sla_type=:s, contract_coverage=:c, pm_visits_count=:p, contract_value=:v, contract_duration=:d, sla_expiration_date=:e WHERE id=:id"),
+                                                 {"b": um_brand, "m": um_model, "s": um_sla, "c": um_coverage, "p": int(um_pm), "v": um_val, "d": um_dur, "e": str(um_exp), "id": int(machine['id'])})
+                                st.success("✅ تم تحديث كرت تفاصيل المعدة ومواصفات العقد السحابي فوراً!")
+                                st.rerun()
+            else: st.info("لا توجد أجهزة مسجلة ومربوطة بهذا العميل حالياً.")
 
-# --- 7. إدارة الفنيين والمهندسين ---
+    with tab2:
+        with st.form("add_client_advanced_form"):
+            st.write("➕ تسجيل ملف عميل أو شركة جديدة بالمنظومة:")
+            ac_name = st.text_input("اسم العميل / المؤسسة بالكامل *:")
+            ac_addr = st.text_input("المقر والعنوان الإداري الميداني *:")
+            if st.form_submit_button("إدراج وحفظ ملف العميل"):
+                if ac_name and ac_addr:
+                    with engine.begin() as conn:
+                        conn.execute(text("INSERT INTO clients (name, address) VALUES (:name, :addr)"), {"name": ac_name, "addr": ac_addr})
+                    st.success("🎉 تم إضافة وتأصيل ملف العميل بنجاح بالمستودع السحابي الموحد!")
+                    st.rerun()
+
+# ----------------------------------------------------
+# 7. 👨‍💻 إدارة فريق الفنيين والصلاحيات الكاملة
+# ----------------------------------------------------
 elif menu == "👨‍💻 إدارة فريق الفنيين":
     st.title("👨‍💻 سجل كادر الفنيين والمهندسين والتحكم بالحالة الميدانية")
-    tech_tab1, tech_tab2, tech_tab3 = st.tabs(["📋 قائمة الفنيين ومتابعة الحالة الميدانية", "➕ إضافة فني/مهندس جديد", "✏️ تعديل بيانات الملف الشخصي"])
+    t_tab1, t_tab2, t_tab3 = st.tabs(["📋 متابعة التوافر الفوري للفريق", "➕ إضافة مهندس/فني جديد بملف متكامل", "✏️ تعديل وتحديث أي حقل في ملف المهندس"])
     status_options = ["متاح", "إجازة سنوية", "إجازة مرضية", "مهمة عمل", "غياب", "استقال", "مشغول لدى عميل"]
     
     df_techs = pd.read_sql_query(text("SELECT * FROM technicians ORDER BY id"), engine)
 
-    with tech_tab1:
+    with t_tab1:
         if not df_techs.empty:
             for _, r_tech in df_techs.iterrows():
-                # استخدام .get() بأمان تام لمنع انهيار البرنامج وظهور KeyError 7
-                t_city = r_tech.get('city', 'طرابلس') if 'city' in df_techs.columns else 'طرابلس'
-                t_phone = r_tech.get('phone', '---') if 'phone' in df_techs.columns else '---'
-                t_email = r_tech.get('email', '---') if 'email' in df_techs.columns else '---'
-                t_img = r_tech.get('image_path', '') if 'image_path' in df_techs.columns else ''
-                
                 st.markdown(f"""
-                <div style="background-color:#F8FAFC; padding:15px; border-radius:10px; border-right:6px solid #1E3A8A; margin-bottom:15px;">
+                <div style="background-color:#F8FAFC; padding:15px; border-radius:10px; border-right:6px solid #1E3A8A; margin-bottom:12px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
                         <div>
-                            <h4>👨‍🔧 المهندس: {r_tech['name']} ({r_tech.get('specialty', 'عام')})</h4>
-                            <b>📍 المدينة المتواجد بها:</b> {t_city} | <b>📱 هاتف:</b> {t_phone} | <b>📧 إيميل:</b> {t_email}<br>
-                            <b>🟢 الحالة الفورية الميدانية:</b> <span style="font-weight:bold; color:#1E3A8A;">{r_tech['status']}</span>
+                            <h4>👨‍🔧 المهندس بالشركة: {r_tech['name']} ({r_tech.get('specialty', 'عام')})</h4>
+                            <b>📍 المدينة المغطاة ميدانياً:</b> {r_tech.get('city', 'طرابلس')} | <b>📱 رقم الهاتف المباشر للعمل:</b> {r_tech.get('phone', '---')}<br>
+                            <b>🟢 الحالة التشغيلية الفورية للحركة الميدانية:</b> <span style="color:#1E3A8A; font-weight:bold;">{r_tech['status']}</span>
                         </div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-                
                 if r_tech['status'] == "مشغول لدى عميل":
-                    st.info(f"🔗 المهندس مشغول بمهمة صيانة جارية حالياً، يمكنك مراجعة صفحة البلاغات للتتبع.")
-        else: st.info("لا يوجد مهندسون مسجلون.")
-            
-    with tech_tab2:
-        with st.form("add_tech_form"):
-            nt_name = st.text_input("اسم المهندس / الفني بالكامل *:")
-            nt_spec = st.text_input("التخصص الفني التقني *:")
-            if st.form_submit_button("اعتماد وإدراج المهندس"):
-                if nt_name and nt_spec:
-                    with engine.begin() as conn:
-                        conn.execute(text("INSERT INTO technicians (name, specialty, status) VALUES (:name, :spec, 'متاح')"), {"name": nt_name, "spec": nt_spec})
-                    st.success("🎉 تم الحفظ والمزامنة السحابية بنجاح!")
-                    st.rerun()
+                    st.info("🔗 المهندس مبرمج حالياً بمهمة صيانة عطل خارجي جاري، تتبع تفاصيلها بصفحة التذاكر.")
+        else: st.info("لا توجد أسماء مسجلة بكادر المهندسين.")
 
-    with tech_tab3:
-        st.info("لتحديث بيانات الفنيين المتقدمة، يرجى مراجعة الخيارات المتاحة أو تحديث قاعدة البيانات.")
+    with t_tab2:
+        # منح الصلاحيات الكاملة لإضافة مهندس جديد بكل معلوماته وصورته الشخصية
+        with st.form("add_technician_full_permissions"):
+            st.subheader("➕ قيد وإدراج مهندس جديد بكافة الصلاحيات الميدانية والبيانات الرسمية:")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                nt_name = st.text_input("اسم المهندس / الفني الثلاثي بالكامل *:")
+                nt_spec = st.text_input("التخصص الفني الدقيق المعتمد *:")
+                nt_city = st.text_input("المدينة أو المنطقة المتواجد بها التغطية *:", value="طرابلس")
+            with col_f2:
+                nt_phone = st.text_input("رقم الهاتف المحمول المباشر للعمل *:")
+                nt_email = st.text_input("البريد الإلكتروني المهني بالشركة:")
+                nt_status = st.selectbox("حالة التوافر الميدانية الأولية المعتمدة للجدولة:", status_options)
+            uploaded_img = st.file_uploader("قم برفع وإرفاق الصورة الشخصية الرسمية للمهندس بالفولدر السحابي التعريفي:", type=['jpg', 'png', 'jpeg'])
+            
+            if st.form_submit_button("اعتماد وتثبيت قيد الفني بالفريق"):
+                if nt_name and nt_spec and nt_phone:
+                    img_path_save = ""
+                    if uploaded_img:
+                        img_path_save = f"uploads/tech_images/tech_{int(time.time())}.png"
+                        with open(img_path_save, "wb") as f: f.write(uploaded_img.getbuffer())
+                    with engine.begin() as conn:
+                        conn.execute(text("INSERT INTO technicians (name, specialty, phone, email, status, city, image_path) VALUES (:n, :s, :p, :e, :st, :c, :i)"),
+                                     {"n": nt_name, "s": nt_spec, "p": nt_phone, "e": nt_email, "st": nt_status, "c": nt_city, "i": img_path_save})
+                    st.success("🎉 تم حفظ ملف المهندس الجديد ورفع صورته للمنظومة سحابيّاً بنجاح!")
+                    st.rerun()
+                else: st.error("يرجى إكمال الحقول الإجبارية المعلم عليها بنجمة (*) لإتمام قيد الهوية بنجاح.")
+
+    with t_tab3:
+        if not df_techs.empty:
+            tech_dict = {r['name']: r['id'] for _, r in df_techs.iterrows()}
+            selected_t_edit = st.selectbox("اختر فني أو مهندس لتعديل وتحديث أي حقل من حقول ملفه الإداري الفوري:", list(tech_dict.keys()))
+            t_edit_id = tech_dict[selected_t_edit]
+            t_info = df_techs[df_techs['id'] == t_edit_id].iloc[0]
+            
+            with st.form("edit_tech_advanced_form"):
+                st.subheader(f"✏️ تعديل كافة حقول وثيقة المهندس: {t_info['name']}")
+                col_ue1, col_ue2 = st.columns(2)
+                with col_ue1:
+                    u_t_name = st.text_input("تعديل الاسم بالكامل وبدقة الحروف:", value=t_info['name'])
+                    u_t_spec = st.text_input("تحديث التخصص التقني المعين للعمل الميداني:", value=t_info.get('specialty', ''))
+                    u_t_city = st.text_input("تعديل مدينة ونطاق التغطية الدورية للآلات:", value=t_info.get('city', 'طرابلس'))
+                with col_ue2:
+                    u_t_phone = st.text_input("تحديث رقم هاتف الاتصال السريع المقيد:", value=t_info.get('phone', ''))
+                    u_t_email = st.text_input("تحديث البريد الإلكتروني الرسمي التابع للمكتب:", value=t_info.get('email', ''))
+                    u_t_status = st.selectbox("تغيير وتحديث الحالة الفورية الجارية للفني:", status_options, index=status_options.index(t_info['status']) if t_info['status'] in status_options else 0)
+                if st.form_submit_button("حفظ وتثبيت كافة التعديلات المحدثة بملف المهندس"):
+                    with engine.begin() as conn:
+                        conn.execute(text("UPDATE technicians SET name=:name, specialty=:spec, phone=:phone, email=:email, status=:status, city=:city WHERE id=:id"),
+                                     {"name": u_t_name, "spec": u_t_spec, "phone": u_t_phone, "email": u_t_email, "status": u_t_status, "city": u_t_city, "id": int(t_edit_id)})
+                    st.success("✅ تم تحديث وتطهير ملف المهندس وتعديل حقوله الميدانية بنجاح!")
+                    st.rerun()
 
 # --- 8. إعدادات العقود ---
 elif menu == "⚙️ إعدادات أنواع العقود":
-    st.title("⚙️ إدارة مسميات وأنواع العقود المركزية")
+    st.title("⚙️ إدارة مسميات وأنواع العقود المركزية (SLAs)")
     sla_df = pd.read_sql_query(text("SELECT id, name as \"نوع العقد المعتمد\" FROM sla_types ORDER BY id"), engine)
     
     col_s1, col_s2 = st.columns([1, 2])
     with col_s1:
-        with st.form("add_sla"):
-            new_sla_name = st.text_input("اكتب مسمى العقد المركزي الجديد:")
+        with st.form("add_sla_advanced"):
+            new_name = st.text_input("اكتب تصنيف ومسمى العقد المركزي الجديد ليكون متاحاً بالخيارات:")
             if st.form_submit_button("حفظ وتأكيد الإضافة"):
-                if new_sla_name:
+                if new_name:
                     try:
-                        with engine.begin() as conn:
-                            conn.execute(text("INSERT INTO sla_types (name) VALUES (:name)"), {"name": new_sla_name})
-                        st.success("تمت الإضافة بنجاح للمستودع!")
-                        st.rerun()
-                    except: st.error("❌ مسمى العقد مسجل وموجود مسبقاً.")
+                        with engine.begin() as conn: conn.execute(text("INSERT INTO sla_types (name) VALUES (:name)"), {"name": new_name})
+                        st.success("تمت الإضافة بنجاح للمستودع المرجعي!"); st.rerun()
+                    except: st.error("❌ هذا المسمى موجود مسبقاً.")
     with col_s2:
-        st.dataframe(sla_df.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
+        st.write("📋 قائمة التبويبات والمسميات المعتمدة لفرز جودة الأداء المالي والفني:")
+        st.dataframe(sla_df, use_container_width=True)
