@@ -15,7 +15,23 @@ def get_engine():
     return create_engine(DB_URL)
 
 engine = get_engine()
-
+def calculate_sla_status(exp_date_str):
+    if not exp_date_str: 
+        return "غير محدد"
+    try:
+        # تحويل النص إلى تاريخ ومقارنته باليوم الحاضر
+        exp_date = datetime.strptime(str(exp_date_str), "%Y-%m-%d").date()
+        today = datetime.now().date()
+        delta = (exp_date - today).days
+        
+        if delta > 0: 
+            return f"🟢 ساري (متبقي {delta} يوم)"
+        elif delta == 0: 
+            return "🟡 ينتهي اليوم"
+        else: 
+            return f"🔴 منتهي (منذ {abs(delta)} يوم)"
+    except: 
+        return "صيغة غير صحيحة"
 # ضبط إعدادات الصفحة والتصميم الداعم لـ RTL بالكامل
 st.set_page_config(page_title="منظومة إدارة الأداء الفني - شركة المكتب الرقمي", page_icon="🛠️", layout="wide")
 
