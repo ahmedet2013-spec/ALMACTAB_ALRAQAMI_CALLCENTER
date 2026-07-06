@@ -827,15 +827,16 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                 return f'color: {color}; font-weight: bold;'
                 
             display_df = df_techs[['id', 'name', 'specialty', 'phone', 'email', 'status']].copy()
-            # 🌟 إبراز اسم الموظف المثالي الحالي بنجمة في قائمة الفنيين أيضاً
             winner_name, _ = get_star_technician()
             if winner_name:
                 display_df['name'] = display_df['name'].apply(lambda x: f"{x} ⭐" if x == winner_name else x)
                 
             display_df.columns = ['رقم القيد', 'الاسم بالكامل', 'التخصص التقني الميداني', 'رقم الهاتف المباشر', 'البريد الإلكتروني', 'حالة التوافر الحالية']
-            st.dataframe(display_df.style.map(color_tech_status, subset=['حالة التوافر الحالية']), use_container_width=True)
             
-            # خيارات التصدير لفريق العمل
+            # ضبط التنسيق العربي والمحاذاة اليمينية للجدول
+            styled_tech_df = display_df.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'right'), ('direction', 'rtl')]}])
+            st.dataframe(styled_tech_df, use_container_width=True)
+            
             st.download_button("📥 تصدير قائمة وسجل كادر الفنيين لـ Excel", to_excel(df_techs), "فريق_العمل_الفني.xlsx", "application/vnd.ms-excel")
         else:
             st.info("لا توجد أسماء مقيدة بسجل الفنيين التابعين للمنظومة المركزية.")
@@ -845,7 +846,7 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
             col1, col2 = st.columns(2)
             with col1:
                 t_name = st.text_input("اسم المهندس / الفني الثلاثي *:")
-                t_spec = st.text_input("التخصص الفني الدقيق (مثل: أنظمة إنتاج رقمي، PLC، ميكانيكا طابعات):")
+                t_spec = st.text_input("التخصص الفني الدقيق:")
                 t_status = st.selectbox("حالة العمل والتوافر الأولية:", status_options)
             with col2:
                 t_phone = st.text_input("رقم الهاتف المباشر والخاص بالعمل:")
@@ -864,7 +865,7 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
     with tech_tab3:
         if not df_techs.empty:
             tech_dict = {f"{row['name']} - ({row['specialty'] or 'دون تخصص'})": row['id'] for _, row in df_techs.iterrows()}
-            selected_tech = st.selectbox("🔍 اختر الفني أو المهندس المراد تعديل ملفه وحالته التوافرية:", list(tech_dict.keys()))
+            selected_tech = st.selectbox("🔍 اختر الفني أو المهندس المراد تعديل ملفه:", list(tech_dict.keys()))
             tech_id = tech_dict[selected_tech]
             t_info = df_techs[df_techs['id'] == tech_id].iloc[0]
             
@@ -886,8 +887,6 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                         st.success("✅ تم تحديث ملف المهندس وتثبيت حالته الميدانية الفورية بنجاح!")
                         time.sleep(0.3)
                         st.rerun()
-                    else:
-                        st.error("الاسم الثلاثي للفني حقل إلزامي لتوثيق الهوية البرمجية.")
 
 # ----------------------------------------------------
 # ⚙️ إعدادات أنواع العقود
@@ -912,8 +911,6 @@ elif menu == "⚙️ إعدادات أنواع العقود":
                         st.rerun()
                     except:
                         st.error("❌ هذا المسمى مسجل وموجود بالفعل في القائمة.")
-                else:
-                    st.warning("يرجى إدخال مسمى صحيح.")
         
         with st.expander("✏️ تعديل اسم أو صياغة عقد متاح حالياً"):
             if not sla_df.empty:
@@ -931,24 +928,11 @@ elif menu == "⚙️ إعدادات أنواع العقود":
                                 st.rerun()
                             except:
                                 st.error("❌ الاسم الجديد مستعمل مع نوع عقد آخر متاح.")
-                        else:
-                            st.warning("أدخل المسمى البديل الجديد.")
-        
-        with st.expander("🗑️ حذف نوع عقد نهائياً من الجداول المرجعية"):
-            if not sla_df.empty:
-                with st.form("delete_sla_form"):
-                    del_name = st.selectbox("اختر العقد لإزالته نهائياً من النظام السحابي:", sla_df["نوع العقد المعتمد"].tolist())
-                    st.warning("⚠️ تنبيه تقني: سيتم حذفه من قائمة الخيارات المتاحة للأجهزة الجديدة فقط ولن يحذف الأجهزة التاريخية.")
-                    if st.form_submit_button("تأكيد الحذف النهائي السحابي"):
-                        with engine.begin() as conn_sla_del:
-                            conn_sla_del.execute(text("DELETE FROM sla_types WHERE name = :name"), {"name": del_name})
-                        st.success("🗑️ تم حذف وإلغاء تصنيف العقد من السجل المرجعي بنجاح.")
-                        time.sleep(0.3)
-                        st.rerun()
 
     with col_s2:
         st.subheader("📋 قائمة مسميات العقود المسجلة مركزياً")
-        st.dataframe(sla_df, use_container_width=True)
+        # ضبط محاذاة جدول العقود لليمين
+        styled_sla_df = sla_df.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'right'), ('direction', 'rtl')]}])
+        st.dataframe(styled_sla_df, use_container_width=True)
         
-        # أداة تصدير أنواع العقود
         st.download_button("📥 تصدير مسميات العقود لـ Excel", to_excel(sla_df), "أنواع_العقود_الرسمية.xlsx", "application/vnd.ms-excel")
