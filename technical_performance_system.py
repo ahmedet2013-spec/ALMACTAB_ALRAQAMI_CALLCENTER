@@ -15,14 +15,6 @@ def get_engine():
 
 engine = get_engine()
 
-# التحقق من وجود وتأسيس الأعمدة المتقدمة في قاعدة البيانات منعاً لانهيار التطبيق
-with engine.begin() as conn:
-    conn.execute(text("ALTER TABLE technicians ADD COLUMN IF NOT EXISTS city TEXT;"))
-    conn.execute(text("ALTER TABLE technicians ADD COLUMN IF NOT EXISTS image_path TEXT;"))
-    conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_coverage TEXT;"))
-    conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_value TEXT;"))
-    conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_duration TEXT;"))
-
 st.set_page_config(page_title="منظومة إدارة الأداء الفني - شركة المكتب الرقمي", page_icon="🛠️", layout="wide")
 
 # تطبيق مظهر الـ RTL الشامل والخطوط العربية الأنيقة
@@ -64,18 +56,24 @@ st.markdown("""
         margin-bottom: 25px;
     }
     
-    .developer-card {
-        background-color: #f8fafc;
+    .kpi-box {
+        background-color: #F8FAFC;
         padding: 15px;
         border-radius: 8px;
-        border-right: 4px solid #1E3A8A;
-        margin-top: 20px;
+        border: 1px solid #E2E8F0;
+        text-align: center !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
 if not os.path.exists("uploads/tech_images"):
     os.makedirs("uploads/tech_images")
+
+# --- إدارة وضع الجلسة للتنقل التشعبي الذكي ---
+if 'view_tech_id' not in st.session_state:
+    st.session_state['view_tech_id'] = None
+if 'current_tab' not in st.session_state:
+    st.session_state['current_tab'] = "📋 متابعة التوافر الفوري للفريق"
 
 # --- الدوال المحورية المساعدة ---
 def calculate_sla_status(exp_date_str):
@@ -190,7 +188,7 @@ if menu == "📊 لوحة التحكم والأداء الشهري":
             st.markdown('</div>', unsafe_allow_html=True)
 
     if not performance_df.empty:
-        fig = px.bar(performance_df, x='name', y='score', title="منحنى الكفاءة الإجمالي للفريق الحلي", color='score')
+        fig = px.bar(performance_df, x='name', y='score', title="منحنى الكفاءة الإجمالي للفريق الحالي", color='score')
         st.plotly_chart(fig, use_container_width=True)
 
 # --- 2. البحث الشامل ---
@@ -233,7 +231,7 @@ elif menu == "➕ تسجيل بلاغ صيانة جديد":
                 m_model = st.text_input("تأكيد الموديل:", value=f"{target['brand']} {target['model']}")
                 i_type = st.text_input("نوع ونطاق العطل الحالي:")
             with col2:
-                priority = st.selectbox("حساسية الاستجابة والطلب:", ["استجابة سريعة فورية", "استجابة عادية"])
+                priority = st.selectbox("مستوى حساسية الاستجابة والطلب:", ["استجابة سريعة فورية", "استجابة عادية"])
                 t_name = st.selectbox("المهندس المسؤول عن التنفيذ *:", [r['name'] for _, r in tech_rows.iterrows()])
                 desc = st.text_area("وصف مفصل للمشتكى التقني العابر:")
             if st.form_submit_button("إصدار وتثبيت التذكرة"):
@@ -309,7 +307,6 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                 st.markdown(f"### 🖨️ قائمة الآلات الموجودة لدى العميل: {c_info['name']}")
                 equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
                 
-                # جرد الأجهزة الدقيق والشامل متضمناً مواصفات العقود الموسعة والزيارات
                 for _, machine in equip_df.iterrows():
                     st.markdown(f"""
                     <div style="background-color:#F8FAFC; padding:15px; border-radius:10px; border-right:6px solid #1E3A8A; margin-bottom:12px; line-height:1.7;">
@@ -332,7 +329,7 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                                 um_pm = st.number_input("تعديل إجمالي عدد الزيارات الدورية السنوية (PM):", min_value=0, max_value=24, value=int(machine.get('pm_visits_count', 0)))
                                 um_val = st.text_input("تعديل القيمة المالية السنوية للعقد (د.ل):", value=str(machine.get('contract_value', '0')))
                                 um_dur = st.text_input("تعديل مدة سريان العقد الحالية للآلة:", value=str(machine.get('contract_duration', 'سنة واحدة')))
-                                um_exp = st.date_input("تعديل تاريخ انتهاء الصلاحية والغلق للضمان:", value=pd.to_datetime(machine['sla_expiration_date']).date())
+                                um_exp = st.date_input("تعديل تاريخ انتهاء الصلاحية وغلق للضمان:", value=pd.to_datetime(machine['sla_expiration_date']).date())
                             if st.form_submit_button("اعتماد وحفظ كافة الحقول المعدلة للآلة"):
                                 with engine.begin() as conn:
                                     conn.execute(text("UPDATE equipment SET brand=:b, model=:m, sla_type=:s, contract_coverage=:c, pm_visits_count=:p, contract_value=:v, contract_duration=:d, sla_expiration_date=:e WHERE id=:id"),
@@ -354,41 +351,80 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                     st.rerun()
 
 # ----------------------------------------------------
-# 7. 👨‍💻 إدارة فريق الفنيين والصلاحيات الكاملة
+# 7. 👨‍💻 إدارة فريق الفنيين والربط والتشعب التلقائي لبلاغاتهم ومؤشراتهم
 # ----------------------------------------------------
 elif menu == "👨‍💻 إدارة فريق الفنيين":
     st.title("👨‍💻 سجل كادر الفنيين والمهندسين والتحكم بالحالة الميدانية")
-    t_tab1, t_tab2, t_tab3 = st.tabs(["📋 متابعة التوافر الفوري للفريق", "➕ إضافة مهندس/فني جديد بملف متكامل", "✏️ تعديل وتحديث أي حقل في ملف المهندس"])
-    status_options = ["متاح", "إجازة سنوية", "إجازة مرضية", "مهمة عمل", "غياب", "استقال", "مشغول لدى عميل"]
     
+    # استرداد الداتا المحدثة لكادر الفنيين والبلاغات
     df_techs = pd.read_sql_query(text("SELECT * FROM technicians ORDER BY id"), engine)
+    df_all_tk = pd.read_sql_query(text("SELECT t.*, c.name as client_name, e.brand, e.model, e.serial_number FROM tickets t JOIN equipment e ON t.equipment_id = e.id JOIN clients c ON e.client_id = c.id"), engine)
+
+    t_tab1, t_tab2, t_tab3, t_tab4 = st.tabs(["📋 متابعة التوافر الفوري للفريق", "🔍 بروفايل وبطاقة المهندس الذكية", "➕ إضافة مهندس/فني جديد", "✏️ تعديل وتحديث ملف مهندس"])
 
     with t_tab1:
         if not df_techs.empty:
+            st.write("💡 **اضغط على زر (🔍 استعراض البروفايل وبطاقة الأداء) بجانب أي مهندس للانتقال الفوري إلى مؤشراته والتقارير المنجزة:**")
             for _, r_tech in df_techs.iterrows():
                 st.markdown(f"""
                 <div style="background-color:#F8FAFC; padding:15px; border-radius:10px; border-right:6px solid #1E3A8A; margin-bottom:12px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
-                        <div>
-                            <h4>👨‍🔧 المهندس بالشركة: {r_tech['name']} ({r_tech.get('specialty', 'عام')})</h4>
-                            <b>📍 المدينة المغطاة ميدانياً:</b> {r_tech.get('city', 'طرابلس')} | <b>📱 رقم الهاتف المباشر للعمل:</b> {r_tech.get('phone', '---')}<br>
-                            <b>🟢 الحالة التشغيلية الفورية للحركة الميدانية:</b> <span style="color:#1E3A8A; font-weight:bold;">{r_tech['status']}</span>
-                        </div>
-                    </div>
+                    <h4>👨‍🔧 المهندس بالشركة: {r_tech['name']} ({r_tech.get('specialty', 'عام')})</h4>
+                    <b>📍 المدينة المغطاة:</b> {r_tech.get('city', 'طرابلس')} | <b>📱 الهاتف المباشر:</b> {r_tech.get('phone', '---')}<br>
+                    <b>🟢 الحالة الميدانية الجارية:</b> <span style="color:#1E3A8A; font-weight:bold;">{r_tech['status']}</span>
                 </div>
                 """, unsafe_allow_html=True)
-                if r_tech['status'] == "مشغول لدى عميل":
-                    st.info("🔗 المهندس مبرمج حالياً بمهمة صيانة عطل خارجي جاري، تتبع تفاصيلها بصفحة التذاكر.")
+                
+                # زر التشعب الذكي الموازي للرابط التشعيبي للانتقال الفوري لبطاقة المهندس
+                if st.button(f"🔍 استعراض البروفايل وبطاقة الأداء لـ {r_tech['name']}", key=f"nav_tech_{r_tech['id']}"):
+                    st.session_state['view_tech_id'] = r_tech['id']
+                    st.session_state['current_tab'] = "🔍 بروفايل وبطاقة المهندس الذكية"
+                    st.rerun()
         else: st.info("لا توجد أسماء مسجلة بكادر المهندسين.")
 
     with t_tab2:
-        # منح الصلاحيات الكاملة لإضافة مهندس جديد بكل معلوماته وصورته الشخصية
-        with st.form("add_technician_full_permissions"):
+        # قراءة المعرف الممرر بالجلسة لتحديد المهندس المستهدف أو استخدام قائمة منسدلة سريعة
+        if not df_techs.empty:
+            tech_selection_dict = {row['name']: row['id'] for _, row in df_techs.iterrows()}
+            default_index = 0
+            if st.session_state['view_tech_id'] in tech_selection_dict.values():
+                default_index = list(tech_selection_dict.values()).index(st.session_state['view_tech_id'])
+            
+            selected_tech_profile = st.selectbox("اختر أو راجع بروفايل المهندس المستهدف:", list(tech_selection_dict.keys()), index=default_index)
+            active_tech_id = tech_selection_dict[selected_tech_profile]
+            tech_profile_data = df_techs[df_techs['id'] == active_tech_id].iloc[0]
+            
+            # فلترة وحساب البلاغات والمؤشرات الخاصة بهذا المهندس بدقة تامة من السحابة
+            tech_tickets = df_all_tk[df_all_tk['tech_id'] == active_tech_id]
+            completed_tk = tech_tickets[tech_tickets['status'] == 'مغلق']
+            ongoing_tk = tech_tickets[tech_tickets['status'] != 'مغلق']
+            ftf_count = tech_tickets['first_time_fix'].sum()
+            
+            st.markdown(f"## 📊 بطاقة تقييم الأداء والمؤشرات للمهندس: {tech_profile_data['name']}")
+            
+            # عرض مؤشرات الأداء الحالية (KPIs)
+            kpi_c1, kpi_c2, kpi_c3, kpi_c4 = st.columns(4)
+            with kpi_c1: st.markdown(f'<div class="kpi-box">📥 <b>إجمالي البلاغات المسندة</b><br><h3>{len(tech_tickets)}</h3></div>', unsafe_allow_html=True)
+            with kpi_c2: st.markdown(f'<div class="kpi-box">✅ <b>بلاغات أنجزت ومغلقة</b><br><h3>{len(completed_tk)}</h3></div>', unsafe_allow_html=True)
+            with kpi_c3: st.markdown(f'<div class="kpi-box">⏳ <b>بلاغات قيد الإنجاز</b><br><h3>{len(ongoing_tk)}</h3></div>', unsafe_allow_html=True)
+            with kpi_c4: st.markdown(f'<div class="kpi-box">⚙️ <b>الإصلاح من أول زيارة (FTF)</b><br><h3>{ftf_count}</h3></div>', unsafe_allow_html=True)
+            
+            st.markdown("---")
+            st.markdown("### 📋 السجل التفصيلي للبلاغات والمهام المرتبطة بالمهندس")
+            if not tech_tickets.empty:
+                display_tech_tk = tech_tickets[['id', 'client_name', 'brand', 'model', 'serial_number', 'status', 'time_reported']].copy()
+                display_tech_tk.columns = ['رقم التذكرة', 'العميل المستفيد', 'الماركة', 'الموديل', 'السيريال (S/N)', 'حالة البلاغ الحالية', 'تاريخ وتوقيت البلاغ']
+                st.dataframe(display_tech_tk.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
+            else:
+                st.info("💡 لا توجد تذاكر صيانة أو بلاغات مسجلة ومسندة لهذا المهندس حالياً.")
+        else: st.info("المستودع فارغ.")
+
+    with t_tab3:
+        with st.form("add_technician_form"):
             st.subheader("➕ قيد وإدراج مهندس جديد بكافة الصلاحيات الميدانية والبيانات الرسمية:")
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 nt_name = st.text_input("اسم المهندس / الفني الثلاثي بالكامل *:")
-                nt_spec = st.text_input("التخصص الفني الدقيق المعتمد *:")
+                nt_spec = st.text_input("التخصص الفني التقني المعتمد *:")
                 nt_city = st.text_input("المدينة أو المنطقة المتواجد بها التغطية *:", value="طرابلس")
             with col_f2:
                 nt_phone = st.text_input("رقم الهاتف المحمول المباشر للعمل *:")
@@ -407,17 +443,15 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                                      {"n": nt_name, "s": nt_spec, "p": nt_phone, "e": nt_email, "st": nt_status, "c": nt_city, "i": img_path_save})
                     st.success("🎉 تم حفظ ملف المهندس الجديد ورفع صورته للمنظومة سحابيّاً بنجاح!")
                     st.rerun()
-                else: st.error("يرجى إكمال الحقول الإجبارية المعلم عليها بنجمة (*) لإتمام قيد الهوية بنجاح.")
 
-    with t_tab3:
+    with t_tab4:
         if not df_techs.empty:
-            tech_dict = {r['name']: r['id'] for _, r in df_techs.iterrows()}
-            selected_t_edit = st.selectbox("اختر فني أو مهندس لتعديل وتحديث أي حقل من حقول ملفه الإداري الفوري:", list(tech_dict.keys()))
-            t_edit_id = tech_dict[selected_t_edit]
+            tech_dict_up = {r['name']: r['id'] for _, r in df_techs.iterrows()}
+            sel_t_up = st.selectbox("اختر فني أو مهندس لتعديل ملفه الإداري الفوري:", list(tech_dict_up.keys()))
+            t_edit_id = tech_dict_up[sel_t_up]
             t_info = df_techs[df_techs['id'] == t_edit_id].iloc[0]
             
             with st.form("edit_tech_advanced_form"):
-                st.subheader(f"✏️ تعديل كافة حقول وثيقة المهندس: {t_info['name']}")
                 col_ue1, col_ue2 = st.columns(2)
                 with col_ue1:
                     u_t_name = st.text_input("تعديل الاسم بالكامل وبدقة الحروف:", value=t_info['name'])
