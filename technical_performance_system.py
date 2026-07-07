@@ -15,7 +15,7 @@ def get_engine():
 
 engine = get_engine()
 
-# تأسيس وتأمين جداول المستخدمين والعقود المتقدمة
+# تأسيس وتحديث الجداول وهياكل البيانات المتقدمة سحابياً
 with engine.begin() as conn:
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS system_users (
@@ -26,20 +26,38 @@ with engine.begin() as conn:
             role TEXT
         );
     """))
-    # إضافة المستخدم الافتراضي الإداري إذا لم يكن موجوداً
     conn.execute(text("""
         INSERT INTO system_users (username, password, full_name, role)
         VALUES ('Ahmed', 'admin123', 'م. أحمد عثمان', 'Admin')
         ON CONFLICT (username) DO NOTHING;
     """))
+    # تحديث وتطوير جدول أنواع العقود الحاكم لدعم المميزات والمدد يدوياً
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS sla_types_advanced (
+            id SERIAL PRIMARY KEY,
+            contract_name TEXT UNIQUE,
+            features TEXT,
+            default_duration TEXT
+        );
+    """))
+    # إدراج عقد افتراضي مرجعي لحماية المنظومة
+    conn.execute(text("""
+        INSERT INTO sla_types_advanced (contract_name, features, default_duration)
+        VALUES ('بدون عقد', 'لا يوجد مميزات', '0')
+        ON CONFLICT (contract_name) DO NOTHING;
+    """))
+    
+    # تحديث وتأمين حقول جدول المعدات والأجهزة
     conn.execute(text("ALTER TABLE technicians ADD COLUMN IF NOT EXISTS city TEXT;"))
     conn.execute(text("ALTER TABLE technicians ADD COLUMN IF NOT EXISTS image_path TEXT;"))
     conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_coverage TEXT;"))
     conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_value TEXT;"))
     conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_duration TEXT;"))
+    conn.execute(text("ALTER TABLE equipment ADD COLUMN IF NOT EXISTS contract_start_date TEXT;"))
 
 st.set_page_config(page_title="منظومة إدارة الأداء الفني - شركة المكتب الرقمي", page_icon="🛠️", layout="wide")
 
+# تطبيق مظهر الـ RTL الشامل والخطوط العربية الأنيقة
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
@@ -104,16 +122,21 @@ if 'view_tech_id' not in st.session_state: st.session_state['view_tech_id'] = No
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_fullname' not in st.session_state: st.session_state['user_fullname'] = ""
 
-# --- الدوال المساعدة ---
-def calculate_sla_status(exp_date_str):
-    if not exp_date_str: return "غير محدد"
+# --- دالة احتساب حالة العقد ومخرجات الشارات الملونة المطلوبة بدقة هندسية ---
+def calculate_advanced_contract_status(sla_name, exp_date_str):
+    if not sla_name or sla_name == "بدون عقد" or not exp_date_str:
+        return "🟡 بدون عقد مبرم"
     try:
         exp_date = pd.to_datetime(exp_date_str).date()
         delta = (exp_date - datetime.now().date()).days
-        if delta > 30: return f"🟢 ساري المفعول (متبقي {delta} يوم)"
-        elif 0 < delta <= 30: return f"🟡 شارف على الانتهاء (متبقي {delta} يوم)"
-        else: return f"🔴 منتهي الصلاحية (منذ {abs(delta)} يوم)"
-    except: return "صيغة غير صحيحة"
+        if delta > 0:
+            return f"🟢 ساري المفعول (متبقي {delta} يوم)"
+        elif delta == 0:
+            return "🟢 ينتهي اليوم الحاضر"
+        else:
+            return f"🔴 منتهي الصلاحية (منذ {abs(delta)} يوم)"
+    except:
+        return "🔴 تاريخ غير صحيح"
 
 def to_excel(df):
     output = io.BytesIO()
@@ -224,7 +247,7 @@ if menu == "📊 لوحة التحكم والأداء الشهري":
         fig = px.bar(performance_df, x='name', y='score', title="منحنى الكفاءة الإجمالي للفريق الحالي", color='score')
         st.plotly_chart(fig, use_container_width=True)
 
-# --- 2. البحث الشامل ---
+# --- 2. البحث الشامل عن جهاز (S/N) متضمناً الأعمدة المحدثة ومؤشرات الصلاحية ---
 elif menu == "🔍 البحث الشامل عن جهاز (S/N)":
     st.title("🔍 بروفايل وبطاقة تعريف الآلة الذكية")
     sn_input = st.text_input("أدخل الرقم التسلسلي (S/N) للآلة:").strip()
@@ -232,13 +255,15 @@ elif menu == "🔍 البحث الشامل عن جهاز (S/N)":
         eq_df = pd.read_sql_query(text("SELECT e.*, c.name as client_name FROM equipment e JOIN clients c ON e.client_id = c.id WHERE e.serial_number = :sn"), engine, params={"sn": sn_input})
         if not eq_df.empty:
             eq = eq_df.iloc[0]
+            status_badge = calculate_advanced_contract_status(eq['sla_type'], eq['sla_expiration_date'])
             st.markdown(f"""
             <div style="background-color:#F8FAFC; padding:20px; border-radius:10px; border-right:8px solid #1E3A8A; line-height:1.8;">
                 <h3>🖥️ الطراز: {eq['brand']} {eq['model']} (S/N: {eq['serial_number']})</h3>
-                <b>🏢 العميل:</b> {eq['client_name']} | <b>📜 نوع العقد:</b> {eq['sla_type']}<br>
-                <b>⏳ صلاحية العقد الفعلي:</b> {calculate_sla_status(eq['sla_expiration_date'])}<br>
-                <b>📦 ما يشمله العقد بالتفصيل:</b> {eq.get('contract_coverage', 'غير محدد')}<br>
-                <b>💰 القيمة والمدة السنوية:</b> {eq.get('contract_value', '---')} د.ل / {eq.get('contract_duration', '---')}
+                <b>🏢 العميل المالك:</b> {eq['client_name']}<br>
+                <b>📜 نوع ونطاق العقد المختار:</b> {eq['sla_type']}<br>
+                <b>⏳ حالة صلاحية العقد الحالية وغطاء السريان:</b> <span style="font-weight:bold; font-size:16px;">{status_badge}</span><br>
+                <b>📦 شمولية ومميزات العقد التفصيلية:</b> {eq.get('contract_coverage', 'غير محدد')}<br>
+                <b>💰 القيمة المالية السنوية للجهاز:</b> {eq.get('contract_value', '0')} د.ل | <b>📅 تاريخ بدء العقد:</b> {eq.get('contract_start_date', '---')}
             </div>
             """, unsafe_allow_html=True)
         else: st.error("⚠️ لم يتم العثور على الرقم التسلسلي.")
@@ -246,14 +271,17 @@ elif menu == "🔍 البحث الشامل عن جهاز (S/N)":
 # --- 3. تسجيل بلاغ صيانة جديد ---
 elif menu == "➕ تسجيل بلاغ صيانة جديد":
     st.title("➕ فتح وتوثيق بلاغ صيانة جديد")
-    eq_rows = pd.read_sql_query(text("SELECT e.id, c.name as client_name, e.brand, e.model, e.serial_number FROM equipment e JOIN clients c ON e.client_id = c.id"), engine)
+    eq_rows = pd.read_sql_query(text("SELECT e.id, c.name as client_name, e.brand, e.model, e.serial_number, e.sla_type, e.sla_expiration_date FROM equipment e JOIN clients c ON e.client_id = c.id"), engine)
     tech_rows = pd.read_sql_query(text("SELECT id, name FROM technicians"), engine)
     if not eq_rows.empty and not tech_rows.empty:
         equip_options = {f"{r['client_name']} - {r['brand']} {r['model']} ({r['serial_number']})": r['id'] for _, r in eq_rows.iterrows()}
         selected_label = st.selectbox("اختر الآلة المشكو منها:", list(equip_options.keys()))
         eq_id = equip_options[selected_label]
-        target = pd.read_sql_query(text("SELECT * FROM equipment WHERE id = :id"), engine, params={"id": int(eq_id)}).iloc[0]
-        st.warning(f"🔍 التحقق التلقائي للعقد: {target['sla_type']} ({calculate_sla_status(target['sla_expiration_date'])})")
+        target = eq_rows[eq_rows['id'] == eq_id].iloc[0]
+        
+        status_badge = calculate_advanced_contract_status(target['sla_type'], target['sla_expiration_date'])
+        st.warning(f"🔍 التحقق التلقائي للآلة: نوع العقد: {target['sla_type']} | حالة غطاء السريان الفوري: {status_badge}")
+        
         with st.form("add_ticket_form"):
             col1, col2 = st.columns(2)
             with col1:
@@ -271,7 +299,7 @@ elif menu == "➕ تسجيل بلاغ صيانة جديد":
                                  {"eid": int(eq_id), "tid": int(t_id), "desc": f"[{priority}] {m_type} - {i_type}: {desc}", "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
                 st.success("🎉 تم فتح وتثبيت بلاغ الصيانة بنجاح!")
 
-# --- 4. إدارة التذاكر والبلاغات ---
+# --- 4. إدارة البلاغات والتذاكر ---
 elif menu == "🖥️ إدارة البلاغات والتذاكر":
     st.title("🖥️ إدارة البلاغات وتعديل التذاكر")
     df_tk = pd.read_sql_query(text("SELECT t.*, c.name as client_name, e.serial_number FROM tickets t JOIN equipment e ON t.equipment_id = e.id JOIN clients c ON e.client_id = c.id ORDER BY t.id DESC"), engine)
@@ -299,10 +327,15 @@ elif menu == "📅 الزيارات الدورية (PM)":
         st.dataframe(df_pm, use_container_width=True)
     else: st.info("لا توجد زيارات وقائية مجدولة حالياً.")
 
-# --- 6. إدارة العملاء والأجهزة ---
+# --- 6. إدارة العملاء والأجهزة (Profile) مدمجاً بها الأعمدة التعاقدية الشاملة والمؤشرات الملونة ---
 elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
     st.title("🗂️ ملفات العملاء والأجهزة الذكية")
-    tab1, tab2 = st.tabs(["🗂️ ملفات العملاء وجرد الأجهزة التابعة لهم", "➕ إضافة عميل/شركة جديدة"])
+    tab1, tab2, tab3 = st.tabs(["🗂️ ملفات العملاء وجرد الأجهزة التابعة لهم", "➕ إضافة عميل/شركة جديدة", "📋 جرد واستعراض إجمالي الآلات والأجهزة"])
+    
+    # جلب قائمة العقود المدخلة يدوياً لاستعمالها في القوائم المنسدلة
+    sla_db_rows = pd.read_sql_query(text("SELECT contract_name, features FROM sla_types_advanced"), engine)
+    sla_options_list = sla_db_rows['contract_name'].tolist() if not sla_db_rows.empty else ["بدون عقد"]
+
     with tab1:
         clients_df = pd.read_sql_query(text("SELECT * FROM clients ORDER BY id"), engine)
         if not clients_df.empty:
@@ -310,9 +343,7 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
             selected_client_id = client_dict[st.selectbox("ابحث عن عميل للوصول لكافة حقوله وأجهزته المعنية:", list(client_dict.keys()))]
             c_info = clients_df[clients_df['id'] == selected_client_id].iloc[0]
             
-            # تم تأمين وإصلاح السطر 319 المبتور بالكامل هنا
             with st.form("edit_client_advanced"):
-                st.subheader("📝 تعديل وتحديث أي حقل من حقول بروفايل العميل الحالي:")
                 u_name = st.text_input("اسم العميل أو الجهة المختصة *:", value=c_info['name'])
                 u_addr = st.text_input("العنوان والمقر الميداني المعتمد:", value=c_info['address'] or "")
                 if st.form_submit_button("حفظ التغييرات الشاملة لبروفايل العميل"):
@@ -321,18 +352,80 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                     st.success("✅ تم تحديث حقول ملف العميل بنجاح!")
                     st.rerun()
 
+            st.markdown("---")
             equip_df = pd.read_sql_query(text("SELECT * FROM equipment WHERE client_id = :cid"), engine, params={"cid": int(selected_client_id)})
             if not equip_df.empty:
-                equip_df['حالة العقد'] = equip_df['sla_expiration_date'].apply(calculate_sla_status)
+                st.markdown(f"### 🖨️ قائمة الآلات الموجودة لدى العميل: {c_info['name']}")
+                
+                # احتساب الشارات برمجياً لكل آلة بشكل منفصل
                 for _, machine in equip_df.iterrows():
+                    status_badge = calculate_advanced_contract_status(machine['sla_type'], machine['sla_expiration_date'])
                     st.markdown(f"""
                     <div style="background-color:#F8FAFC; padding:15px; border-radius:10px; border-right:6px solid #1E3A8A; margin-bottom:12px; line-height:1.7;">
                         <b>🖥️ موديل ونوع الآلة:</b> {machine['brand']} {machine['model']} | <b>🏷️ الرقم التسلسلي (S/N):</b> {machine['serial_number']}<br>
-                        <b>📅 تاريخ التركيب:</b> {machine['installation_date']} | <b>📜 نوع العقد:</b> {machine['sla_type']}<br>
-                        <b>⏳ حالة العقد والسريان بالأيام:</b> {machine['حالة العقد']}<br>
-                        <b>⚙️ الزيارات الدورية (PM):</b> {machine.get('pm_visits_count', 0)} زيارة | <b>💰 قيمة العقد:</b> {machine.get('contract_value', '0')} د.ل
+                        <b>📅 تاريخ التركيب:</b> {machine['installation_date']} | <b>📜 نوع العقد المبرم يدوياً:</b> {machine['sla_type']}<br>
+                        <b>⏳ حالة وصلاحية العقد الحالية بالأيام:</b> <span style="font-weight:bold;">{status_badge}</span><br>
+                        <b>⚙️ الزيارات الدورية (PM):</b> {machine.get('pm_visits_count', 0)} زيارة | <b>💰 سعر العقد للجهاز:</b> {machine.get('contract_value', '0')} د.ل
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    with st.expander(f"⚙️ تعديل وتحديث أي حقل من حقول الآلة ومواصفات عقدها (S/N: {machine['serial_number']}):"):
+                        with st.form(f"edit_machine_{machine['id']}_form"):
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1:
+                                um_brand = st.text_input("تعديل الماركة:", value=machine['brand'])
+                                um_model = st.text_input("تعديل الموديل الدقيق للمعدة:", value=machine['model'])
+                                # ميزة اختيار نوع العقد المطلوب المضاف يدوياً من القائمة
+                                um_sla = st.selectbox("اختر نوع العقد المطلوب للجهاز (من العقود المدخلة يدوياً):", sla_options_list, index=sla_options_list.index(machine['sla_type']) if machine['sla_type'] in sla_options_list else 0)
+                                # جلب الميزات تلقائياً للمساعدة الشفافة
+                                coverage_feat = sla_db_rows[sla_db_rows['contract_name'] == um_sla].iloc[0]['features'] if not sla_db_rows[sla_db_rows['contract_name'] == um_sla].empty else "يد عاملة فقط"
+                                um_coverage = st.text_area("مميزات وتغطية العقد التفصيلية المعتمدة:", value=str(coverage_feat))
+                            with col_m2:
+                                um_pm = st.number_input("إجمالي عدد الزيارات الدورية السنوية (PM):", min_value=0, max_value=24, value=int(machine.get('pm_visits_count', 0)))
+                                um_val = st.text_input("سعر ومستحقات العقد المخصصة لهذا الجهاز (د.ل) *:", value=str(machine.get('contract_value', '0')))
+                                um_dur = st.text_input("مدة العقد الإجمالية وسريانه (مثال: سنة):", value=str(machine.get('contract_duration', 'سنة واحدة')))
+                                um_start = st.date_input("تاريخ بدء تفعيل العقد للجهاز:", value=pd.to_datetime(machine.get('contract_start_date', datetime.now())).date())
+                                um_exp = st.date_input("تاريخ انتهاء صلاحية وغلق العقد المبرم *:", value=pd.to_datetime(machine['sla_expiration_date']).date())
+                            if st.form_submit_button("اعتماد وحفظ كافة الحقول المعدلة للآلة"):
+                                with engine.begin() as conn:
+                                    conn.execute(text("UPDATE equipment SET brand=:b, model=:m, sla_type=:s, contract_coverage=:c, pm_visits_count=:p, contract_value=:v, contract_duration=:d, contract_start_date=:sdate, sla_expiration_date=:e WHERE id=:id"),
+                                                 {"b": um_brand, "m": um_model, "s": um_sla, "c": um_coverage, "p": int(um_pm), "v": um_val, "d": um_dur, "sdate": str(um_start), "e": str(um_exp), "id": int(machine['id'])})
+                                st.success("✅ تم تحديث كرت تفاصيل المعدة ومواصفات العقد وسعره فوراً!")
+                                st.rerun()
+            else: st.info("لا توجد أجهزة مسجلة ومربوطة بهذا العميل حالياً.")
+
+    with tab2:
+        with st.form("add_client_advanced_form"):
+            st.write("➕ تسجيل ملف عميل أو شركة جديدة بالمنظومة:")
+            ac_name = st.text_input("اسم العميل / المؤسسة بالكامل *:")
+            ac_addr = st.text_input("المقر والعنوان الإداري الميداني *:")
+            if st.form_submit_button("إدراج وحفظ ملف العميل"):
+                if ac_name and ac_addr:
+                    with engine.begin() as conn:
+                        conn.execute(text("INSERT INTO clients (name, address) VALUES (:name, :addr)"), {"name": ac_name, "addr": ac_addr})
+                    st.success("🎉 تم إضافة ملف العميل بنجاح بالمستودع السحابي الموحد!")
+                    st.rerun()
+
+    with tab3:
+        # استعراض إجمالي الآلات والأجهزة مضافاً إليه عمود نوع العقد وحالة صلاحيته بالأيام والشارات الملونة
+        st.subheader("📋 استعراض إجمالي جرد ومراقبة كافة الآلات والأجهزة بالمنظومة")
+        all_eq_query = "SELECT c.name as client_name, e.* FROM equipment e JOIN clients c ON e.client_id = c.id ORDER BY e.id DESC"
+        all_eq_df = pd.read_sql_query(text(all_eq_query), engine)
+        
+        if not all_eq_df.empty:
+            # بناء عمود حساب صلاحية العقد برمجياً وإخراج شارات (خضراء، حمراء، صفراء) لكل آلة
+            all_eq_df['نوع العقد لكل آلة'] = all_eq_df['sla_type']
+            all_eq_df['صلاحية العقد وغطاء السريان الحالي'] = all_eq_df.apply(lambda row: calculate_advanced_contract_status(row['sla_type'], row['sla_expiration_date']), axis=1)
+            all_eq_df['سعر العقد للجهاز'] = all_eq_df['contract_value'].fillna('0') + " د.ل"
+            
+            display_general_df = all_eq_df[['client_name', 'brand', 'model', 'serial_number', 'نوع العقد لكل آلة', 'سعر العقد للجهاز', 'صلاحية العقد وغطاء السريان الحالي']].copy()
+            display_general_df.columns = ['العميل المالك', 'الماركة', 'الموديل', 'الرقم التسلسلي (S/N)', 'نوع العقد الحاكم', 'سعر العقد المسجل', 'حالة صلاحية العقد بالأيام']
+            
+            # عرض الجدول الموحد والمحاذى بالكامل لليمين
+            st.dataframe(display_general_df.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
+            st.download_button("📥 تصدير الجرد العام والمؤشرات لـ Excel", to_excel(all_eq_df), "الجرد_العام_للآلات.xlsx")
+        else:
+            st.info("لم يتم قيد وتوثيق أي أجهزة أو معدات بالمنظومة حتى الآن.")
 
 # --- 7. 👨‍💻 إدارة فريق الفنيين ---
 elif menu == "👨‍💻 إدارة فريق الفنيين":
@@ -345,6 +438,7 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
 
     with t_tab1:
         if not df_techs.empty:
+            st.write("💡 **اضغط على زر (🔍 استعراض البروفايل وبطاقة الأداء) بجانب أي مهندس للاطلاع على مؤشراته والتقارير المنجزة:**")
             for _, r_tech in df_techs.iterrows():
                 st.markdown(f"""
                 <div style="background-color:#F8FAFC; padding:15px; border-radius:10px; border-right:6px solid #1E3A8A; margin-bottom:12px;">
@@ -440,21 +534,38 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                     st.success("✅ تم تحديث وتطهير ملف المهندس بنجاح!")
                     st.rerun()
 
-# --- 8. إعدادات العقود ---
+# --- 8. ⚙️ إعدادات أنواع العقود المركزية (تم تطويرها بالكامل لتشمل المميزات والمدد يدوياً) ---
 elif menu == "⚙️ إعدادات أنواع العقود":
-    st.title("⚙️ إدارة مسميات وأنواع العقود المركزية (SLAs)")
-    sla_df = pd.read_sql_query(text("SELECT id, name as \"نوع العقد المعتمد\" FROM sla_types ORDER BY id"), engine)
+    st.title("⚙️ إدارة وتوثيق مسميات وأنواع العقود المركزية (SLAs)")
+    
     col_s1, col_s2 = st.columns([1, 2])
     with col_s1:
-        with st.form("add_sla_advanced"):
-            new_name = st.text_input("اكتب تصنيف ومسمى العقد المركزي الجديد ليكون متاحاً بالخيارات:")
-            if st.form_submit_button("حفظ وتأكيد الإضافة"):
-                if new_name:
+        with st.form("add_sla_advanced_features"):
+            st.subheader("➕ إضافة عقد مبرم جديد يدوياً")
+            contract_name = st.text_input("اكتب مسمى أو تصنيف العقد الجديد * (مثال: العقد الذهبي Premium):")
+            features = st.selectbox("مميزات وتغطية العقد التقنية *:", [
+                "يد عاملة فقط", 
+                "يد عاملة + قطع غيار", 
+                "يد عاملة + قطع الغيار + مستهلكات"
+            ])
+            duration = st.text_input("مدة العقد الافتراضية المقترحة (مثال: 12 شهر):", value="12 شهر")
+            
+            if st.form_submit_button("حفظ وتوثيق العقد بالخطة"):
+                if contract_name:
                     try:
-                        with engine.begin() as conn: conn.execute(text("INSERT INTO sla_types (name) VALUES (:name)"), {"name": new_name})
-                        st.success("تمت الإضافة بنجاح!"); st.rerun()
-                    except: st.error("❌ هذا المسمى موجود مسبقاً.")
-    with col_s2: st.dataframe(sla_df, use_container_width=True)
+                        with engine.begin() as conn:
+                            conn.execute(text("INSERT INTO sla_types_advanced (contract_name, features, default_duration) VALUES (:name, :feat, :dur)"),
+                                         {"name": contract_name.strip(), "feat": features, "dur": duration})
+                        st.success("🎉 تم حفظ وتوثيق العقد الجديد ومميزاته بنجاح في المستودع المرجعي!")
+                        st.rerun()
+                    except:
+                        st.error("❌ مسمى العقد هذا مسجل وموجود مسبقاً بالقائمة.")
+                else: st.error("اسم العقد المركزي حقل إلزامي.")
+                
+    with col_s2:
+        st.subheader("📋 قائمة مسميات العقود ومواصفات التغطية المسجلة يدوياً")
+        sla_df = pd.read_sql_query(text("SELECT id as \"رقم العقد\", contract_name as \"نوع العقد المعتمد\", features as \"مميزات وتغطية العقد\", default_duration as \"مدة العقد الافتراضية\" FROM sla_types_advanced ORDER BY id ASC"), engine)
+        st.dataframe(sla_df, use_container_width=True)
 
 # --- 9. 🔐 إدارة مستخدمي المنظومة ---
 elif menu == "🔐 إدارة مستخدمي المنظومة":
@@ -475,7 +586,7 @@ elif menu == "🔐 إدارة مستخدمي المنظومة":
                     if not chk_p.empty:
                         with engine.begin() as conn:
                             conn.execute(text("UPDATE system_users SET password = :np WHERE full_name = :f"), {"np": new_pass, "f": current_user})
-                        st.success("✅ تم تحديث كلمة السر بنجاح! سيتم تطبيق التغييرات فوراً.")
+                        st.success("✅ تم تحديث كلمة السر بنجاح!")
                     else: st.error("❌ كلمة المرور الحالية غير صحيحة، يرجى التثبت.")
                 else: st.warning("تأكد من تطابق كلمتي المرور الجديدة وعدم ترك الخانات فارغة.")
                 
@@ -493,6 +604,6 @@ elif menu == "🔐 إدارة مستخدمي المنظومة":
                         with engine.begin() as conn:
                             conn.execute(text("INSERT INTO system_users (username, password, full_name, role) VALUES (:u, :p, :f, :r)"),
                                          {"u": new_username, "p": new_password, "f": new_fullname, "r": new_role})
-                        st.success(f"🎉 تم إنشاء حساب المستخدم الموظف [{new_fullname}] بنجاح، وبإمكانه تسجيل الدخول الآن!")
+                        st.success(f"🎉 تم إنشاء حساب المستخدم الموظف [{new_fullname}] بنجاح!")
                     except: st.error("❌ اسم المستخدم هذا مسجل مسبقاً لموظف آخر، اختر اسماً فريداً.")
                 else: st.error("جميع الحقول الإجبارية معلم عليها بنجمة (*) ويجب ملؤها.")
