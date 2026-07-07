@@ -72,8 +72,6 @@ if not os.path.exists("uploads/tech_images"):
 # --- إدارة وضع الجلسة للتنقل التشعبي الذكي ---
 if 'view_tech_id' not in st.session_state:
     st.session_state['view_tech_id'] = None
-if 'current_tab' not in st.session_state:
-    st.session_state['current_tab'] = "📋 متابعة التوافر الفوري للفريق"
 
 # --- الدوال المحورية المساعدة ---
 def calculate_sla_status(exp_date_str):
@@ -351,57 +349,52 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                     st.rerun()
 
 # ----------------------------------------------------
-# 7. 👨‍💻 إدارة فريق الفنيين والربط والتشعب التلقائي لبلاغاتهم ومؤشراتهم
+# 7. 👨‍💻 إدارة فريق الفنيين
 # ----------------------------------------------------
 elif menu == "👨‍💻 إدارة فريق الفنيين":
     st.title("👨‍💻 سجل كادر الفنيين والمهندسين والتحكم بالحالة الميدانية")
     
-    # استرداد الداتا المحدثة لكادر الفنيين والبلاغات
     df_techs = pd.read_sql_query(text("SELECT * FROM technicians ORDER BY id"), engine)
     df_all_tk = pd.read_sql_query(text("SELECT t.*, c.name as client_name, e.brand, e.model, e.serial_number FROM tickets t JOIN equipment e ON t.equipment_id = e.id JOIN clients c ON e.client_id = c.id"), engine)
 
     t_tab1, t_tab2, t_tab3, t_tab4 = st.tabs(["📋 متابعة التوافر الفوري للفريق", "🔍 بروفايل وبطاقة المهندس الذكية", "➕ إضافة مهندس/فني جديد", "✏️ تعديل وتحديث ملف مهندس"])
+    status_options = ["متاح", "إجازة سنوية", "إجازة مرضية", "مهمة عمل", "غياب", "استقال", "مشغول لدى عميل"]
 
     with t_tab1:
         if not df_techs.empty:
-            st.write("💡 **اضغط على زر (🔍 استعراض البروفايل وبطاقة الأداء) بجانب أي مهندس للانتقال الفوري إلى مؤشراته والتقارير المنجزة:**")
+            st.write("💡 **اضغط على زر (🔍 استعراض البروفايل وبطاقة الأداء) بجانب أي مهندس للاطلاع على مؤشراته والتقارير المنجزة:**")
             for _, r_tech in df_techs.iterrows():
                 st.markdown(f"""
                 <div style="background-color:#F8FAFC; padding:15px; border-radius:10px; border-right:6px solid #1E3A8A; margin-bottom:12px;">
                     <h4>👨‍🔧 المهندس بالشركة: {r_tech['name']} ({r_tech.get('specialty', 'عام')})</h4>
-                    <b>📍 المدينة المغطاة:</b> {r_tech.get('city', 'طرابلس')} | <b>📱 الهاتف المباشر:</b> {r_tech.get('phone', '---')}<br>
+                    <b>📍 المدينة المغطاة:</b> {r_tech.get('city', 'طرابلس')} | <b>📱 رقم الهاتف المباشر للعمل:</b> {r_tech.get('phone', '---')}<br>
                     <b>🟢 الحالة الميدانية الجارية:</b> <span style="color:#1E3A8A; font-weight:bold;">{r_tech['status']}</span>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # زر التشعب الذكي الموازي للرابط التشعيبي للانتقال الفوري لبطاقة المهندس
                 if st.button(f"🔍 استعراض البروفايل وبطاقة الأداء لـ {r_tech['name']}", key=f"nav_tech_{r_tech['id']}"):
                     st.session_state['view_tech_id'] = r_tech['id']
-                    st.session_state['current_tab'] = "🔍 بروفايل وبطاقة المهندس الذكية"
                     st.rerun()
         else: st.info("لا توجد أسماء مسجلة بكادر المهندسين.")
 
     with t_tab2:
-        # قراءة المعرف الممرر بالجلسة لتحديد المهندس المستهدف أو استخدام قائمة منسدلة سريعة
         if not df_techs.empty:
             tech_selection_dict = {row['name']: row['id'] for _, row in df_techs.iterrows()}
             default_index = 0
             if st.session_state['view_tech_id'] in tech_selection_dict.values():
                 default_index = list(tech_selection_dict.values()).index(st.session_state['view_tech_id'])
             
-            selected_tech_profile = st.selectbox("اختر أو راجع بروفايل المهندس المستهدف:", list(tech_selection_dict.keys()), index=default_index)
+            selected_tech_profile = st.selectbox("اختر بروفايل المهندس المستهدف لاستعراض مؤشراته الحالية:", list(tech_selection_dict.keys()), index=default_index)
             active_tech_id = tech_selection_dict[selected_tech_profile]
             tech_profile_data = df_techs[df_techs['id'] == active_tech_id].iloc[0]
             
-            # فلترة وحساب البلاغات والمؤشرات الخاصة بهذا المهندس بدقة تامة من السحابة
             tech_tickets = df_all_tk[df_all_tk['tech_id'] == active_tech_id]
             completed_tk = tech_tickets[tech_tickets['status'] == 'مغلق']
             ongoing_tk = tech_tickets[tech_tickets['status'] != 'مغلق']
             ftf_count = tech_tickets['first_time_fix'].sum()
             
-            st.markdown(f"## 📊 بطاقة تقييم الأداء والمؤشرات للمهندس: {tech_profile_data['name']}")
+            st.markdown(f"## 📊 وثيقة تقييم الأداء والمهام للمهندس: {tech_profile_data['name']}")
             
-            # عرض مؤشرات الأداء الحالية (KPIs)
             kpi_c1, kpi_c2, kpi_c3, kpi_c4 = st.columns(4)
             with kpi_c1: st.markdown(f'<div class="kpi-box">📥 <b>إجمالي البلاغات المسندة</b><br><h3>{len(tech_tickets)}</h3></div>', unsafe_allow_html=True)
             with kpi_c2: st.markdown(f'<div class="kpi-box">✅ <b>بلاغات أنجزت ومغلقة</b><br><h3>{len(completed_tk)}</h3></div>', unsafe_allow_html=True)
@@ -419,6 +412,7 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
         else: st.info("المستودع فارغ.")
 
     with t_tab3:
+        # 🌟 إصلاح الخطأ البرمجي وإضافة زر st.form_submit_button التابع للنموذج بنجاح 🌟
         with st.form("add_technician_form"):
             st.subheader("➕ قيد وإدراج مهندس جديد بكافة الصلاحيات الميدانية والبيانات الرسمية:")
             col_f1, col_f2 = st.columns(2)
@@ -432,6 +426,7 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                 nt_status = st.selectbox("حالة التوافر الميدانية الأولية المعتمدة للجدولة:", status_options)
             uploaded_img = st.file_uploader("قم برفع وإرفاق الصورة الشخصية الرسمية للمهندس بالفولدر السحابي التعريفي:", type=['jpg', 'png', 'jpeg'])
             
+            # زر الإرسال المفقود تم استعادته وتثبيته داخل الفورم
             if st.form_submit_button("اعتماد وتثبيت قيد الفني بالفريق"):
                 if nt_name and nt_spec and nt_phone:
                     img_path_save = ""
@@ -443,6 +438,8 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                                      {"n": nt_name, "s": nt_spec, "p": nt_phone, "e": nt_email, "st": nt_status, "c": nt_city, "i": img_path_save})
                     st.success("🎉 تم حفظ ملف المهندس الجديد ورفع صورته للمنظومة سحابيّاً بنجاح!")
                     st.rerun()
+                else:
+                    st.error("❌ يرجى ملء الحقول الإجبارية المعلم عليها بنجمة (*) لضمان قيد الحفظ.")
 
     with t_tab4:
         if not df_techs.empty:
