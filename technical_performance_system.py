@@ -54,7 +54,6 @@ with engine.begin() as conn:
 
 st.set_page_config(page_title="منظومة إدارة الأداء الفني - شركة المكتب الرقمي", page_icon="🛠️", layout="wide")
 
-# تطبيق مظهر الـ RTL الشامل والخطوط العربية الأنيقة
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
@@ -114,15 +113,14 @@ st.markdown("""
 if not os.path.exists("uploads/tech_images"):
     os.makedirs("uploads/tech_images")
 
-# --- إدارة حالات الجلسة المحورية ---
 if 'view_tech_id' not in st.session_state: st.session_state['view_tech_id'] = None
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_fullname' not in st.session_state: st.session_state['user_fullname'] = ""
 
-# --- دالة احتساب حالة العقد ومخرجات الشارات الملونة المطلوبة ---
+# --- دالة احتساب حالة العقد ومخرجات الشارات الملونة المطلوبة بدقة ---
 def calculate_advanced_contract_status(sla_name, exp_date_str):
     if not sla_name or sla_name == "بدون عقد" or not exp_date_str or str(exp_date_str).strip().lower() == 'none':
-        return "🟡 بدون عقد مبرم"
+        return "يجري العمل بآلية: 🟡 بدون عقد مبرم"
     try:
         exp_date = pd.to_datetime(exp_date_str).date()
         delta = (exp_date - datetime.now().date()).days
@@ -315,16 +313,17 @@ elif menu == "🖥️ إدارة البلاغات والتذاكر":
                 st.success("✅ تم تحديث كافة حقول البلاغ بنجاح!")
                 st.rerun()
 
-# --- 5. الزيارات الدورية ---
+# --- 5. الزيارات الدورية الحاصنة من عقود الـ Null ---
 elif menu == "📅 الزيارات الدورية (PM)":
     st.title("📅 لوحة تحكم ومراقبة الزيارات الوقائية (PM)")
-    df_pm = pd.read_sql_query(text("SELECT p.id, c.name as client_name, e.brand, e.model, e.serial_number, e.pm_visits_count, p.scheduled_date, p.status FROM pm_visits p JOIN equipment e ON p.equipment_id = e.id JOIN clients c ON e.client_id = c.id ORDER BY p.scheduled_date ASC"), engine)
+    # الفلترة الصارمة: جلب الزيارات فقط للأجهزة التي تملك عدد زيارات أكبر من 0 ولا يقع نطاق عقدها تحت بند "بدون عقد"
+    df_pm = pd.read_sql_query(text("SELECT p.id, c.name as client_name, e.brand, e.model, e.serial_number, e.pm_visits_count, p.scheduled_date, p.status FROM pm_visits p JOIN equipment e ON p.equipment_id = e.id JOIN clients c ON e.client_id = c.id WHERE e.pm_visits_count > 0 AND e.sla_type != 'بدون عقد' ORDER BY p.scheduled_date ASC"), engine)
     if not df_pm.empty:
         df_pm.columns = ['رقم الزيارة', 'العميل', 'الماركة', 'الموديل', 'السيريال (S/N)', 'الزيارات الدورية السنوية المجدولة', 'تاريخ الزيارة', 'الحالة']
         st.dataframe(df_pm, use_container_width=True)
-    else: st.info("لا توجد زيارات وقائية مجدولة حالياً.")
+    else: st.info("ℹ️ لا توجد زيارات وقائية مجدولة حالياً (جميع الأجهزة المدرجة حالياً 'بدون عقد' أو عدد زياراتها يساوي صفر).")
 
-# --- 6. إدارة العملاء والأجهزة (Profile) ---
+# --- 6. إدارة العملاء والأجهزة (Profile) - متضمنة الحماية والمصادقة الشرطية لخانة "بدون عقد" ---
 elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
     st.title("🗂️ ملفات العملاء والأجهزة الذكية")
     tab1, tab2, tab3 = st.tabs(["🗂️ ملفات العملاء وجرد الأجهزة التابعة لهم", "➕ إضافة عميل/شركة جديدة", "📋 جرد واستعراض إجمالي الآلات والأجهزة"])
@@ -348,7 +347,7 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                     st.success("✅ تم تحديث حقول ملف العميل بنجاح!")
                     st.rerun()
 
-            # --- 🌟 إصلاح وتطهير نموذج قيد آلة جديدة هنا من الـ NameError 🌟 ---
+            # نموذج قيد آلة جديدة متضمن صيانة ومصادقة شرط "بدون عقد"
             with st.expander(f"➕ إدراج وقيد آلة/جهاز جديد وربطه بالعميل الحالي ({c_info['name']})"):
                 with st.form("add_new_machine_form"):
                     col_an1, col_ue2 = st.columns(2)
@@ -368,16 +367,31 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                         if new_m_brand and new_m_model and new_m_sn:
                             chk_sn_dup = pd.read_sql_query(text("SELECT id FROM equipment WHERE serial_number = :sn"), engine, params={"sn": new_m_sn.strip()})
                             if chk_sn_dup.empty:
+                                # --- 🌟 تطبيق الفكر الإداري: المصادقة والتطهير التلقائي لشرط 'بدون عقد' 🌟 ---
+                                if new_m_sla == "بدون عقد":
+                                    final_pm = 0
+                                    final_val = "0"
+                                    final_dur = "خارج العقد"
+                                    final_start = None
+                                    final_exp = None
+                                else:
+                                    final_pm = int(new_m_pm)
+                                    final_val = str(new_m_val)
+                                    final_dur = str(new_m_dur)
+                                    final_start = str(new_m_start)
+                                    final_exp = str(new_m_exp)
+                                # ----------------------------------------------------------------------
+                                
                                 with engine.begin() as conn:
                                     conn.execute(text("""
                                         INSERT INTO equipment (client_id, brand, model, serial_number, installation_date, sla_type, pm_visits_count, contract_value, contract_duration, contract_start_date, sla_expiration_date, purchased_from_us, location_building)
                                         VALUES (:cid, :b, :m, :sn, :inst, :sla, :pm, :val, :dur, :sdate, :edate, 'المكتب الرقمي', 'المقر الرئيسي')
                                     """), {
                                         "cid": int(selected_client_id), "b": new_m_brand.strip(), "m": new_m_model.strip(), "sn": new_m_sn.strip(),
-                                        "inst": str(datetime.now().date()), "sla": new_m_sla, "pm": int(new_m_pm), "val": new_m_val, "dur": new_m_dur,
-                                        "sdate": str(new_m_start), "edate": str(new_m_exp)
+                                        "inst": str(datetime.now().date()), "sla": new_m_sla, "pm": final_pm, "val": final_val, "dur": final_dur,
+                                        "sdate": final_start, "edate": final_exp
                                     })
-                                st.success("🎉 تم قيد وتأصيل الآلة الجديدة سحابيّاً ومزامنة بياناتها التعاقدية المخصصة!")
+                                st.success("🎉 تم قيد وتأصيل الآلة الجديدة سحابيّاً ومزامنة بياناتها التعاقدية المعزولة بنجاح!")
                                 time.sleep(0.4)
                                 st.rerun()
                             else: st.error("❌ الرقم التسلسلي (S/N) مكرر ومسجل لجهاز آخر بالفعل في النظام.")
@@ -428,9 +442,23 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                                 um_exp = st.date_input("تاريخ انتهاء صلاحية وغلق العقد المبرم *:", value=default_exp_date)
                                 
                             if st.form_submit_button("اعتماد وحفظ كافة الحقول المعدلة للآلة"):
+                                # تطهير وعزل البيانات المحدثة أيضاً في حال التعديل لـ "بدون عقد" في أي وقت
+                                if um_sla == "بدون عقد":
+                                    final_u_pm = 0
+                                    final_u_val = "0"
+                                    final_u_dur = "خارج العقد"
+                                    final_u_start = None
+                                    final_u_exp = None
+                                else:
+                                    final_u_pm = int(um_pm)
+                                    final_u_val = str(um_val)
+                                    final_u_dur = str(um_dur)
+                                    final_u_start = str(um_start)
+                                    final_u_exp = str(um_exp)
+
                                 with engine.begin() as conn:
                                     conn.execute(text("UPDATE equipment SET brand=:b, model=:m, sla_type=:s, contract_coverage=:c, pm_visits_count=:p, contract_value=:v, contract_duration=:d, contract_start_date=:sdate, sla_expiration_date=:e WHERE id=:id"),
-                                                 {"b": um_brand, "m": um_model, "s": um_sla, "c": um_coverage, "p": int(um_pm), "v": um_val, "d": um_dur, "sdate": str(um_start), "e": str(um_exp), "id": int(machine['id'])})
+                                                 {"b": um_brand, "m": um_model, "s": um_sla, "c": um_coverage, "p": final_u_pm, "v": final_u_val, "d": final_u_dur, "sdate": final_u_start, "e": final_u_exp, "id": int(machine['id'])})
                                 st.success("✅ تم تحديث كرت تفاصيل المعدة ومواصفات العقد وسعره فوراً!")
                                 st.rerun()
             else: st.info("لا توجد أجهزة مسجلة ومربوطة بهذا العميل حالياً.")
