@@ -125,10 +125,14 @@ def calculate_advanced_contract_status(sla_name, exp_date_str):
     try:
         exp_date = pd.to_datetime(exp_date_str).date()
         delta = (exp_date - datetime.now().date()).days
-        if delta > 0: return f"🟢 ساري المفعول (متبقي {delta} يوم)"
-        elif delta == 0: return "🟢 ينتهي اليوم الحاضر"
-        else: return f"🔴 منتهي الصلاحية (منذ {abs(delta)} يوم)"
-    except: return "🔴 تاريخ غير صحيح"
+        if delta > 0: 
+            return f"🟢 ساري المفعول (متبقي {delta} يوم)"
+        elif delta == 0: 
+            return "🟢 ينتهي اليوم الحاضر"
+        else: 
+            return f"🔴 منتهي الصلاحية (منذ {abs(delta)} يوم)"
+    except: 
+        return "🔴 تاريخ غير صحيح"
 
 def to_excel(df):
     output = io.BytesIO()
@@ -143,18 +147,21 @@ def get_performance_extremes():
     df_tk = pd.read_sql_query(text("SELECT * FROM tickets"), engine)
     df_th = pd.read_sql_query(text("SELECT * FROM technicians"), engine)
     if df_tk.empty or df_th.empty:
-        if not df_th.empty: return {"name": df_th.iloc[0]['name'], "image": df_th.iloc[0].get('image_path', ''), "is_estimated": True}, None, pd.DataFrame()
+        if not df_th.empty: 
+            return {"name": df_th.iloc[0]['name'], "image": df_th.iloc[0].get('image_path', ''), "is_estimated": True}, None, pd.DataFrame()
         return None, None, pd.DataFrame()
     df_all = df_tk.merge(df_th, left_on='tech_id', right_on='id', suffixes=('_tk', '_tech'))
     df_all['time_reported'] = pd.to_datetime(df_all['time_reported'])
     df_filtered = df_all[df_all['time_reported'].dt.strftime("%Y-%m") == datetime.now().strftime("%Y-%m")]
-    if df_filtered.empty: return {"name": df_th.iloc[0]['name'], "image": df_th.iloc[0].get('image_path', ''), "is_estimated": True}, None, pd.DataFrame()
+    if df_filtered.empty: 
+        return {"name": df_th.iloc[0]['name'], "image": df_th.iloc[0].get('image_path', ''), "is_estimated": True}, None, pd.DataFrame()
     stats = df_filtered.groupby('name').agg(total_visits=('id_tk', 'count'), first_time_fixes=('first_time_fix', 'sum'), pending_count=('status_tk', lambda x: x.str.contains('انتظار').sum())).reset_index().merge(df_th[['name', 'image_path']], on='name', how='left')
     stats['score'] = (stats['total_visits'] * 5) + (stats['first_time_fixes'] * 10) - (stats['pending_count'] * 4)
     sorted_stats = stats.sort_values(by='score', ascending=False)
     winner = {"name": sorted_stats.iloc[0]['name'], "image": sorted_stats.iloc[0].get('image_path', ''), "visits": sorted_stats.iloc[0]['total_visits'], "ftf": sorted_stats.iloc[0]['first_time_fixes']}
     worst = None
-    if len(sorted_stats) > 1: worst = {"name": sorted_stats.iloc[-1]['name'], "image": sorted_stats.iloc[-1].get('image_path', ''), "visits": sorted_stats.iloc[-1]['total_visits'], "pending": sorted_stats.iloc[-1]['pending_count']}
+    if len(sorted_stats) > 1: 
+        worst = {"name": sorted_stats.iloc[-1]['name'], "image": sorted_stats.iloc[-1].get('image_path', ''), "visits": sorted_stats.iloc[-1]['total_visits'], "pending": sorted_stats.iloc[-1]['pending_count']}
     return winner, worst, sorted_stats
 
 # --- نافذة الدخول السحابية المحمية ---
@@ -172,7 +179,8 @@ if not st.session_state['logged_in']:
                     st.session_state['logged_in'] = True
                     st.session_state['user_fullname'] = chk_user.iloc[0]['full_name']
                     st.rerun()
-                else: st.error("❌ بيانات المستخدم أو كلمة السر غير صحيحة.")
+                else: 
+                    st.error("❌ بيانات المستخدم أو كلمة السر غير صحيحة.")
     st.stop()
 
 # --- القائمة الجانبية الحاكمة ---
@@ -254,16 +262,17 @@ elif menu == "🔍 البحث الشامل عن جهاز (S/N)":
                 <b>🏢 العميل المالك:</b> {eq['client_name']}<br>
                 <b>📜 نوع ونطاق العقد المختار:</b> {eq['sla_type']}<br>
                 <b>⏳ حالة صلاحية العقد الحالية وغطاء السريان:</b> <span style="font-weight:bold; font-size:16px;">{status_badge}</span><br>
-                <b>📦 شمولية ومميزات العقد التفصيلية:</b> {eq.get('contract_coverage', 'غير محدد')}<br>
+                <b>📦 ما يشمله العقد بالتفصيل:</b> {eq.get('contract_coverage', 'غير محدد')}<br>
                 <b>💰 القيمة المالية السنوية للجهاز:</b> {eq.get('contract_value', '0')} د.ل | <b>📅 تاريخ بدء العقد:</b> {eq.get('contract_start_date', '---')}
             </div>
             """, unsafe_allow_html=True)
-        else: st.error("⚠️ لم يتم العثور على الرقم التسلسلي.")
+        else: 
+            st.error("⚠️ لم يتم العثور على الرقم التسلسلي.")
 
 # --- 3. تسجيل بلاغ صيانة جديد ---
 elif menu == "➕ تسجيل بلاغ صيانة جديد":
     st.title("➕ فتح وتوثيق بلاغ صيانة جديد")
-    eq_rows = pd.read_sql_query(text("SELECT e.id, c.name as client_name, e.brand, e.model, e.serial_number FROM equipment e JOIN clients c ON e.client_id = c.id"), engine)
+    eq_rows = pd.read_sql_query(text("SELECT e.id, c.name as client_name, e.brand, e.model, e.serial_number, e.sla_type, e.sla_expiration_date FROM equipment e JOIN clients c ON e.client_id = c.id"), engine)
     tech_rows = pd.read_sql_query(text("SELECT id, name FROM technicians"), engine)
     if not eq_rows.empty and not tech_rows.empty:
         equip_options = {f"{r['client_name']} - {r['brand']} {r['model']} ({r['serial_number']})": r['id'] for _, r in eq_rows.iterrows()}
@@ -315,9 +324,10 @@ elif menu == "📅 الزيارات الدورية (PM)":
     if not df_pm.empty:
         df_pm.columns = ['رقم الزيارة', 'العميل', 'الماركة', 'الموديل', 'السيريال (S/N)', 'الزيارات الدورية السنوية المجدولة', 'تاريخ الزيارة', 'الحالة']
         st.dataframe(df_pm, use_container_width=True)
-    else: st.info("ℹ️ لا توجد زيارات وقائية مجدولة حالياً (جميع الأجهزة المدرجة حالياً 'بدون عقد' أو عدد زياراتها يساوي صفر).")
+    else: 
+        st.info("ℹ️ لا توجد زيارات وقائية مجدولة حالياً (جميع الأجهزة المدرجة حالياً 'بدون عقد' أو عدد زياراتها يساوي صفر).")
 
-# --- 6. 🏢 إدارة العملاء والأجهزة (Profile) - متضمنة ميزة الرفع الجماعي الذكي من ملف Excel المحمي ---
+# --- 6. إدارة العملاء والأجهزة (Profile) ---
 elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
     st.title("🗂️ ملفات العملاء والأجهزة الذكية")
     tab1, tab2, tab3, tab4 = st.tabs(["🗂️ ملفات العملاء وجرد الأجهزة التابعة لهم", "➕ إضافة عميل/شركة جديدة", "📥 استيراد جماعي من ملف Excel", "📋 جرد ومستودع كل الأجهزة"])
@@ -374,9 +384,13 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                                         "inst": str(datetime.now().date()), "sla": new_m_sla, "pm": final_pm, "val": final_val, "dur": final_dur,
                                         "sdate": final_start, "edate": final_exp
                                     })
-                                st.success("🎉 تم قيد وتأصيل الآلة الجديدة سحابيّاً ومزامنة بياناتها التعاقدية المعزولة بنجاح!")
-                                time.sleep(0.4); st.rerun()
-                            else: st.error("❌ الرقم التسلسلي (S/N) مكرر ومسجل لجهاز آخر بالفعل في النظام.")
+                                st.success("🎉 تم قيد وتأصيل الآلة الجديدة سحابيّاً ومزامنة بياناتها بنجاح!")
+                                time.sleep(0.4)
+                                st.rerun()
+                            else: 
+                                st.error("❌ الرقم التسلسلي (S/N) مكرر ومسجل لجهاز آخر بالفعل في النظام.")
+                        else:
+                            st.error("يرجى ملء الحقول الإجبارية المعلمة بنجمة (*) لضمان القيد.")
 
             st.markdown("---")
             equip_df = pd.read_sql_query(text("SELECT * FROM equipment WHERE client_id = :cid"), engine, params={"cid": int(selected_client_id)})
@@ -391,6 +405,57 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                         <b>⚙️ الزيارات الدورية (PM):</b> {machine.get('pm_visits_count', 0)} زيارة | <b>💰 سعر العقد للجهاز:</b> {machine.get('contract_value', '0')} د.ل
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    with st.expander(f"⚙️ تعديل وتحديث أي حقل من حقول الآلة ومواصفات عقدها (S/N: {machine['serial_number']}):"):
+                        with st.form(f"edit_machine_{machine['id']}_form"):
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1:
+                                um_brand = st.text_input("تعديل الماركة:", value=machine['brand'])
+                                um_model = st.text_input("تعديل الموديل الدقيق للمعدة:", value=machine['model'])
+                                um_sla = st.selectbox("اختر نوع العقد المطلوب للجهاز (من العقود المدخلة يدوياً):", sla_options_list, index=sla_options_list.index(machine['sla_type']) if machine['sla_type'] in sla_options_list else 0)
+                                coverage_feat = sla_db_rows[sla_db_rows['contract_name'] == um_sla].iloc[0]['features'] if not sla_db_rows[sla_db_rows['contract_name'] == um_sla].empty else "يد عاملة فقط"
+                                um_coverage = st.text_area("مميزات وتغطية العقد التفصيلية المعتمدة:", value=str(coverage_feat))
+                            with col_m2:
+                                um_pm = st.number_input("إجمالي عدد الزيارات الدورية السنوية (PM):", min_value=0, max_value=24, value=int(machine.get('pm_visits_count', 0)))
+                                um_val = st.text_input("سعر ومستحقات العقد المخصصة لهذا الجهاز (د.ل) *:", value=str(machine.get('contract_value', '0')))
+                                um_dur = st.text_input("مدة العقد الإجمالية وسريانه (مثال: سنة):", value=str(machine.get('contract_duration', 'سنة واحدة')))
+                                
+                                c_start_raw = machine.get('contract_start_date')
+                                if c_start_raw and str(c_start_raw).strip().lower() != 'none':
+                                    try: 
+                                        default_start_date = pd.to_datetime(c_start_raw).date()
+                                    except: 
+                                        default_start_date = datetime.now().date()
+                                else: 
+                                    default_start_date = datetime.now().date()
+                                    
+                                um_start = st.date_input("تاريخ بدء تفعيل العقد للجهاز:", value=default_start_date)
+                                c_exp_raw = machine.get('sla_expiration_date')
+                                if c_exp_raw and str(c_exp_raw).strip().lower() != 'none':
+                                    try: 
+                                        default_exp_date = pd.to_datetime(c_exp_raw).date()
+                                    except: 
+                                        default_exp_date = datetime.now().date()
+                                else: 
+                                    default_exp_date = datetime.now().date()
+
+                                um_exp = st.date_input("تاريخ انتهاء صلاحية وغلق العقد المبرم *:", value=default_exp_date)
+                                
+                            if st.form_submit_button("اعتماد وحفظ كافة الحقول المعدلة للآلة"):
+                                if um_sla == "بدون عقد":
+                                    final_u_pm, final_u_val, final_u_dur, final_u_start, final_u_exp = 0, "0", "خارج العقد", None, None
+                                else:
+                                    final_u_pm, final_u_val, final_u_dur, final_u_start, final_u_exp = int(um_pm), str(um_val), str(um_dur), str(um_start), str(um_exp)
+
+                                with engine.begin() as conn:
+                                    conn.execute(text("UPDATE equipment SET brand=:b, model=:m, sla_type=:s, contract_coverage=:c, pm_visits_count=:p, contract_value=:v, contract_duration=:d, contract_start_date=:sdate, sla_expiration_date=:e WHERE id=:id"),
+                                                 {"b": um_brand, "m": um_model, "s": um_sla, "c": um_coverage, "p": final_u_pm, "v": final_u_val, "d": final_u_dur, "sdate": final_u_start, "e": final_u_exp, "id": int(machine['id'])})
+                                st.success("✅ تم تحديث كرت تفاصيل المعدة بنجاح!")
+                                st.rerun()
+            else: 
+                st.info("لا توجد أجهزة مسجلة ومربوطة بهذا العميل حالياً.")
+        else:
+            st.warning("المستودع فارغ من العملاء.")
 
     with tab2:
         with st.form("add_client_advanced_form"):
@@ -401,26 +466,23 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                 if ac_name and ac_addr:
                     with engine.begin() as conn:
                         conn.execute(text("INSERT INTO clients (name, address) VALUES (:name, :addr)"), {"name": ac_name, "addr": ac_addr})
-                    st.success("🎉 تم إضافة ملف العميل بنجاح بالمستودع السحابي الموحد!"); st.rerun()
+                    st.success("🎉 تم إضافة ملف العميل بنجاح بالمستودع السحابي الموحد!")
+                    st.rerun()
 
-    # 🌟 --- التبويب الثالث المطور: استيراد ورفع جماعي للزبائن والآلات من ملف Excel --- 🌟
     with tab3:
         st.subheader("📥 استيراد جماعي لقائمة العملاء والأجهزة من ملف إكسل موحد")
         st.markdown("""
-        💡 **شروط ومواصفات نجاح الاستيراد الجماعي:**
-        تأكد أن ملف الـ Excel المرفوع يحتوي على الأعمدة التالية وبنفس المسميات تماماً لتلافي انهيار السيرفر:
+        💡 **الأعمدة المطلوبة في ملف الـ Excel:**
         `اسم_العميل` | `عنوان_العميل` | `الماركة` | `الموديل` | `الرقم_التسلسلي` | `نوع_العقد` | `الزيارات_السنوية_المطلوبة` | `سعر_العقد` | `تاريخ_انتهاء_العقد`
         """)
         
-        # قالب تحميل مساعد لرؤية الهيكلية
         template_df = pd.DataFrame([{
             "اسم_العميل": "مستشفى طرابلس المركزي", "عنوان_العميل": "شارع الزاوية، طرابلس",
             "الماركة": "Xerox", "الموديل": "AltaLink C8145", "الرقم_التسلسلي": "XER8145009",
             "نوع_العقد": "Premium", "الزيارات_السنوية_المطلوبة": 4, "سعر_العقد": "2500", "تاريخ_انتهاء_العقد": "2027-01-01"
         }])
-        st.download_button("📥 تحميل نموذج وعينة ملف الـ Excel الاسترشادي فارغاً", to_excel(template_df), "نموذج_الاستيراد_الجماعي.xlsx")
-        
-        uploaded_excel = st.file_uploader("قم باختيار أو سحب ملف الـ Excel المحمل بالداتا هنا للرفع الفوري:", type=['xlsx'])
+        st.download_button("📥 تحميل نموذج ملف الـ Excel الاسترشادي", to_excel(template_df), "نموذج_الاستيراد_الجماعي.xlsx")
+        uploaded_excel = st.file_uploader("قم باختيار أو سحب ملف الـ Excel هنا للرفع الفوري:", type=['xlsx'])
         
         if uploaded_excel is not None:
             if st.button("🔄 بدء معالجة الملف واستيراد الداتا جماعياً للسحابة"):
@@ -429,7 +491,7 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                     required_cols = ["اسم_العميل", "عنوان_العميل", "الماركة", "الموديل", "الرقم_التسلسلي", "نوع_العقد", "الزيارات_السنوية_المطلوبة", "سعر_العقد", "تاريخ_انتهاء_العقد"]
                     
                     if not all(col in df_imported.columns for col in required_cols):
-                        st.error("❌ خطأ بنيوي: أسماء الأعمدة في ملف الإكسل المرفوع غير مطابقة للمواصفات المطلوبة!")
+                        st.error("❌ خطأ بنيوي: أسماء الأعمدة في ملف الإكسل المرفوع غير مطابقة للمواصفات!")
                     else:
                         success_counter = 0
                         with engine.begin() as conn:
@@ -444,7 +506,6 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                                 m_val = str(row['سعر_العقد']).strip()
                                 m_exp = str(row['تاريخ_انتهاء_العقد']).strip()
                                 
-                                # 1. التحقق أو إنشاء العميل
                                 chk_cl = conn.execute(text("SELECT id FROM clients WHERE name = :name"), {"name": c_name}).fetchone()
                                 if chk_cl:
                                     client_id_fk = chk_cl[0]
@@ -452,10 +513,8 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                                     res_cl = conn.execute(text("INSERT INTO clients (name, address) VALUES (:name, :addr) RETURNING id"), {"name": c_name, "addr": c_addr})
                                     client_id_fk = res_cl.fetchone()[0]
                                 
-                                # 2. التحقق من عدم تكرار السيريال
                                 chk_eq = conn.execute(text("SELECT id FROM equipment WHERE serial_number = :sn"), {"sn": m_sn}).fetchone()
                                 if not chk_eq:
-                                    # عزل وحماية آلية شرط "بدون عقد"
                                     if m_sla == "بدون عقد" or m_sla == "" or m_sla == "None":
                                         m_sla, m_pm, m_val, m_start_dt, m_exp_dt = "بدون عقد", 0, "0", None, None
                                     else:
@@ -471,10 +530,11 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
                                     })
                                     success_counter += 1
                                     
-                        st.success(f"🎉 تمت العملية بنجاح! تم استيراد وقيد {success_counter} آلة جديدة وجدولة بروفايلات زبائنها تلقائياً على السحابة الموحدة.")
-                        time.sleep(0.5); st.rerun()
+                        st.success(f"🎉 تمت العملية بنجاح! تم استيراد وقيد {success_counter} آلة جديدة.")
+                        time.sleep(0.5)
+                        st.rerun()
                 except Exception as e:
-                    st.error(f"❌ حدث خطأ فني أثناء قراءة البيانات المرفوعة: {str(e)}")
+                    st.error(f"❌ حدث خطأ فني أثناء قراءة البيانات: {str(e)}")
 
     with tab4:
         st.subheader("📋 استعراض الجرد العام وتصدير الداتا الإجمالية")
@@ -489,10 +549,9 @@ elif menu == "🏢 إدارة العملاء والأجهزة (Profile)":
             display_general_df.columns = ['العميل المالك', 'الماركة', 'الموديل', 'الرقم التسلسلي (S/N)', 'نوع العقد الحاكم', 'سعر العقد المسجل', 'حالة صلاحية العقد بالأيام']
             
             st.dataframe(display_general_df.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
-            
-            # زر التصدير الفوري والشامل لجدول الجرد الشامل لكافة الأجهزة
             st.download_button("📥 تصدير الجرد العام والمؤشرات لـ Excel", to_excel(all_eq_df), "الجرد_العام_للآلات.xlsx")
-        else: st.info("المستودع فارغ.")
+        else: 
+            st.info("المستودع فارغ.")
 
 # --- 7. 👨‍💻 إدارة فريق الفنيين ---
 elif menu == "👨‍💻 إدارة فريق الفنيين":
@@ -518,7 +577,8 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                 if st.button(f"🔍 استعراض البروفايل وبطاقة الأداء لـ {r_tech['name']}", key=f"nav_tech_{r_tech['id']}"):
                     st.session_state['view_tech_id'] = r_tech['id']
                     st.info("🔄 تم اختيار المهندس. فضلاً اضغط على تبويب [🔍 بروفايل وبطاقة المهندس الذكية] بالأعلى لمشاهدة التحليل الكامل.")
-        else: st.info("لا توجد أسماء مسجلة.")
+        else: 
+            st.info("لا توجد أسماء مسجلة.")
 
     with t_tab2:
         if not df_techs.empty:
@@ -548,8 +608,10 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                 display_tech_tk = tech_tickets[['id', 'client_name', 'brand', 'model', 'serial_number', 'status', 'time_reported']].copy()
                 display_tech_tk.columns = ['رقم التذكرة', 'العميل المستفيد', 'الماركة', 'الموديل', 'السيريال (S/N)', 'حالة البلاغ الحالية', 'تاريخ وتوقيت البلاغ']
                 st.dataframe(display_tech_tk.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'}), use_container_width=True)
-            else: st.info("💡 لا توجد تذاكر صيانة مسندة لهذا المهندس حالياً.")
-        else: st.info("المستودع فارغ.")
+            else: 
+                st.info("💡 لا توجد تذاكر صيانة مسندة لهذا المهندس حالياً.")
+        else: 
+            st.info("المستودع فارغ.")
 
     with t_tab3:
         with st.form("add_technician_form"):
@@ -576,7 +638,8 @@ elif menu == "👨‍💻 إدارة فريق الفنيين":
                                      {"n": nt_name, "s": nt_spec, "p": nt_phone, "e": nt_email, "st": nt_status, "c": nt_city, "i": img_path_save})
                     st.success("🎉 تم حفظ ملف المهندس الجديد بنجاح!")
                     st.rerun()
-                else: st.error("❌ يرجى ملء الحقول الإجبارية.")
+                else: 
+                    st.error("❌ يرجى ملء الحقول الإجبارية.")
 
     with t_tab4:
         if not df_techs.empty:
@@ -625,8 +688,10 @@ elif menu == "⚙️ إعدادات أنواع العقود":
                                          {"name": contract_name.strip(), "feat": features, "dur": duration})
                         st.success("🎉 تم حفظ وتوثيق العقد الجديد ومميزاته بنجاح!")
                         st.rerun()
-                    except: st.error("❌ مسمى العقد هذا مسجل وموجود مسبقاً بالقائمة.")
-                else: st.error("اسم العقد حقل إلزامي.")
+                    except: 
+                        st.error("❌ مسمى العقد هذا مسجل وموجود مسبقاً بالقائمة.")
+                else: 
+                    st.error("اسم العقد حقل إلزامي.")
                 
     with col_s2:
         st.subheader("📋 قائمة مسميات العقود ومواصفات التغطية المسجلة يدوياً")
@@ -653,4 +718,27 @@ elif menu == "🔐 إدارة مستخدمي المنظومة":
                         with engine.begin() as conn:
                             conn.execute(text("UPDATE system_users SET password = :np WHERE full_name = :f"), {"np": new_pass, "f": current_user})
                         st.success("✅ تم تحديث كلمة السر بنجاح!")
-                    else:
+                    else: 
+                        st.error("❌ كلمة المرور الحالية غير صحيحة، يرجى التثبت.")
+                else: 
+                    st.warning("تأكد من تطابق كلمتي المرور الجديدة وعدم ترك الخانات فارغة.")
+                
+    with u_tab2:
+        st.subheader("إضافة مستخدم جديد وصلاحية وصول مستقلة للسحابة")
+        with st.form("create_new_user_form"):
+            new_username = st.text_input("اسم المستخدم الجديد للدخول (بإلإنجليزية بدون فراغات) *:")
+            new_fullname = st.text_input("الاسم الثلاثي الكامل للموظف/المدير *:")
+            new_password = st.text_input("كلمة المرور المبدئية المخصصة للحساب *:", type="password")
+            new_role = st.selectbox("الصلاحية والامتيازات الوظيفية:", ["Admin", "Technical Manager", "Call Center Staff"])
+            
+            if st.form_submit_button("إصدار وتأصيل الحساب السحابي الجديد"):
+                if new_username and new_fullname and new_password:
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(text("INSERT INTO system_users (username, password, full_name, role) VALUES (:u, :p, :f, :r)"),
+                                         {"u": new_username, "p": new_password, "f": new_fullname, "r": new_role})
+                        st.success(f"🎉 تم إنشاء حساب المستخدم الموظف [{new_fullname}] بنجاح!")
+                    except: 
+                        st.error("❌ اسم المستخدم هذا مسجل مسبقاً لموظف آخر، اختر اسماً فريداً.")
+                else: 
+                    st.error("جميع الحقول الإجبارية معلم عليها بنجمة (*) ويجب ملؤها.")
